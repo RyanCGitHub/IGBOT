@@ -40,6 +40,31 @@ export type Campaign = {
   updated_at: string;
 };
 
+// ─── Content ideas (Phase 6 planning) ──────────────────────────────────────────
+
+export type ContentIdea = {
+  id: number;
+  campaign_id: number;
+  title: string;
+  caption_angle: string | null;
+  visual_concept: string | null;
+  cta: string | null;
+  hashtags: string | null;
+  source_prompt: string | null;
+  converted_post_id: number | null;
+  created_at: string;
+  updated_at: string;
+};
+
+// A freshly generated idea before it is saved — same shape minus DB-only fields.
+export type GeneratedIdea = {
+  title: string;
+  caption_angle: string;
+  visual_concept: string;
+  cta: string;
+  hashtags: string;
+};
+
 export type PostStatus = 'draft' | 'approved' | 'scheduled' | 'posted';
 
 // Single source of truth — import this in every route that validates status.
