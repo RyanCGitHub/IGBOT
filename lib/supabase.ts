@@ -94,6 +94,39 @@ export type PostInsights = {
   updated_at: string;
 };
 
+// ─── Performance review (Phase 9 — ephemeral, never persisted) ──────────────────
+
+export type PerformanceRecommendationCategory =
+  | "Best theme"
+  | "Weak theme"
+  | "Next angle"
+  | "Caption/hook"
+  | "Timing"
+  | "Campaign idea";
+
+export type PerformanceRecommendation = {
+  category: PerformanceRecommendationCategory;
+  title: string;
+  detail: string;
+  // Present only on actionable items so the UI can offer "Save as Content Idea"
+  // via the existing /api/content-ideas route. Never created automatically.
+  idea?: {
+    title: string;
+    caption_angle: string;
+    visual_concept: string;
+    cta: string;
+    hashtags: string;
+  };
+};
+
+export type PerformanceReview = {
+  summary: string;
+  posts_analyzed: number;
+  metrics_note: string;
+  limited: boolean;
+  recommendations: PerformanceRecommendation[];
+};
+
 export type PostStatus = 'draft' | 'approved' | 'scheduled' | 'posted';
 
 // Single source of truth — import this in every route that validates status.
