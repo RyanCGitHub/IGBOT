@@ -82,25 +82,57 @@ export async function publishIgPost(
     post.status === "deleted_on_instagram" ||
     post.status === "deleted_by_dashboard";
 
-  // ── Fetch account ───────────────────────────────────────────────────────────
+  // ── Resolve the account ─────────────────────────────────────────────────────
+  // Priority: explicit override → the post's assigned account.
+  // We never silently pick a "default" account when multiple accounts exist.
   const resolvedAccountId = accountIdOverride ?? post.account_id;
-  const accountRes = resolvedAccountId
-    ? await supabaseServer
-        .from("connected_accounts")
-        .select("id, account_name, ig_user_id, access_token")
-        .eq("id", resolvedAccountId)
-        .single()
-    : await supabaseServer
-        .from("connected_accounts")
-        .select("id, account_name, ig_user_id, access_token")
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .single();
 
-  if (accountRes.error || !accountRes.data) {
-    return err("No connected Instagram account found. Connect an account first.", 400);
+  let account: { id: number; account_name: string; ig_user_id: string; access_token: string };
+
+  if (resolvedAccountId) {
+    // A specific account is assigned (or was passed as an override) — use exactly that one.
+    const accountRes = await supabaseServer
+      .from("connected_accounts")
+      .select("id, account_name, ig_user_id, access_token")
+      .eq("id", resolvedAccountId)
+      .single();
+
+    if (accountRes.error || !accountRes.data) {
+      return err(
+        "The Instagram account assigned to this post is no longer connected. Reconnect it or assign a different account.",
+        400
+      );
+    }
+    account = accountRes.data;
+  } else {
+    // No account assigned — only fall back when exactly ONE account is connected.
+    const allRes = await supabaseServer
+      .from("connected_accounts")
+      .select("id, account_name, ig_user_id, access_token")
+      .order("created_at", { ascending: false });
+
+    if (allRes.error) {
+      return err("Could not look up connected Instagram accounts.", 502);
+    }
+
+    const all = allRes.data ?? [];
+    if (all.length === 0) {
+      return err("No Instagram account connected.", 400);
+    }
+    if (all.length > 1) {
+      // Multiple accounts exist — refuse to guess which one to post to.
+      return err("No Instagram account assigned to this post.", 400);
+    }
+    account = all[0]; // exactly one connected account → safe backward-compatible fallback
   }
-  const account = accountRes.data;
+
+  // Safe log — account name + ig_user_id only, never the token.
+  console.log(
+    `[publish] post ${postId} → publishing as @${account.account_name} (ig_user_id ${account.ig_user_id})`
+  );
+
+  // Prefix failure messages with the account so logs/UI make the target obvious.
+  const withAccount = (msg: string) => `${msg} (account: @${account.account_name})`;
 
   // ── Mark in-progress ────────────────────────────────────────────────────────
   const inProgressStatus = isRepublish ? "republishing" : "publishing";
@@ -134,15 +166,17 @@ export async function publishIgPost(
     account.ig_user_id, account.access_token, post.image_url, post.caption, log
   );
   if ("error" in containerResult) {
-    await failPost(postId, containerResult.error, log);
-    return { success: false, error: containerResult.error, httpStatus: 502, logs: log.all() };
+    const msg = withAccount(containerResult.error);
+    await failPost(postId, msg, log);
+    return { success: false, error: msg, httpStatus: 502, logs: log.all() };
   }
 
   // ── Poll ────────────────────────────────────────────────────────────────────
   const pollResult = await pollContainerStatus(containerResult.containerId, account.access_token, log);
   if ("error" in pollResult) {
-    await failPost(postId, pollResult.error, log);
-    return { success: false, error: pollResult.error, httpStatus: 502, logs: log.all() };
+    const msg = withAccount(pollResult.error);
+    await failPost(postId, msg, log);
+    return { success: false, error: msg, httpStatus: 502, logs: log.all() };
   }
 
   // ── Publish ─────────────────────────────────────────────────────────────────
@@ -150,8 +184,9 @@ export async function publishIgPost(
     account.ig_user_id, containerResult.containerId, account.access_token, log
   );
   if ("error" in publishResult) {
-    await failPost(postId, publishResult.error, log);
-    return { success: false, error: publishResult.error, httpStatus: 502, logs: log.all() };
+    const msg = withAccount(publishResult.error);
+    await failPost(postId, msg, log);
+    return { success: false, error: msg, httpStatus: 502, logs: log.all() };
   }
 
   // ── Permalink (non-fatal) ───────────────────────────────────────────────────

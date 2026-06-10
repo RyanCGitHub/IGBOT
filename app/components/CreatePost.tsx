@@ -364,6 +364,7 @@ export default function CreatePost() {
 
   async function handlePublishNow() {
     if (!file || !caption.trim() || isSubmittingRef.current) return;
+    if (selectedAccountId == null) return; // guarded by disabled button; defensive
     isSubmittingRef.current = true;
     setPendingAction("publish");
     setActionPhase("uploading");
@@ -384,7 +385,7 @@ export default function CreatePost() {
           image_analysis: analysis ?? undefined,
           caption_options: captionOptions ?? undefined,
           normalization_meta: uploaded.normalization as unknown as Record<string, unknown>,
-          account_id: selectedAccountId ?? undefined,
+          account_id: selectedAccountId,
           status: "ready",
         }),
       });
@@ -396,7 +397,7 @@ export default function CreatePost() {
       const pubRes = await apiFetch(`/api/ig-posts/${(createData.post as IgPost).id}/publish`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ account_id: selectedAccountId ?? undefined }),
+        body: JSON.stringify({ account_id: selectedAccountId }),
       });
       const pubData = await pubRes.json();
       setPublishLogs(pubData.logs as LogEntry[] ?? null);
@@ -417,6 +418,7 @@ export default function CreatePost() {
 
   async function handleSchedule() {
     if (!file || !caption.trim() || !scheduleInput || isSubmittingRef.current) return;
+    if (selectedAccountId == null) return; // guarded by disabled button; defensive
 
     const scheduledDate = new Date(scheduleInput);
     if (isNaN(scheduledDate.getTime())) {
@@ -448,7 +450,7 @@ export default function CreatePost() {
           image_analysis: analysis ?? undefined,
           caption_options: captionOptions ?? undefined,
           normalization_meta: uploaded.normalization as unknown as Record<string, unknown>,
-          account_id: selectedAccountId ?? undefined,
+          account_id: selectedAccountId,
           status: "scheduled",
           scheduled_at: scheduledDate.toISOString(),
           timezone: scheduleTz,
@@ -477,6 +479,9 @@ export default function CreatePost() {
   const isDone     = actionPhase === "done_draft" || actionPhase === "done_published" || actionPhase === "done_scheduled";
   const canAnalyze = !!file && !isAnalyzing && !isWorking && !isDone;
   const canSave    = !!file && !!caption.trim() && !isWorking && !isDone;
+  // Publishing and scheduling require a concrete account; drafts may be saved without one.
+  const hasAccount = selectedAccountId != null;
+  const canPublishOrSchedule = canSave && hasAccount;
 
   const phaseLabel: Record<ActionPhase, string> = {
     idle: "",
@@ -717,9 +722,9 @@ export default function CreatePost() {
           <button
             type="button"
             onClick={handlePublishNow}
-            disabled={!canSave || accounts.length === 0}
+            disabled={!canPublishOrSchedule}
             className="rounded-3xl bg-fuchsia-500 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-fuchsia-400 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
-            title={accounts.length === 0 ? "Connect an Instagram account first" : ""}
+            title={accounts.length === 0 ? "Connect an Instagram account first" : !hasAccount ? "Select an Instagram account first" : ""}
           >
             {pendingAction === "publish" ? (
               <span className="flex items-center gap-2">
@@ -732,9 +737,9 @@ export default function CreatePost() {
           <button
             type="button"
             onClick={() => { setShowSchedulePicker(s => !s); setScheduleError(null); }}
-            disabled={!canSave || accounts.length === 0}
+            disabled={!canPublishOrSchedule}
             className="rounded-3xl border border-slate-600 bg-slate-800 px-5 py-2.5 text-sm font-semibold text-slate-200 transition hover:border-fuchsia-500/50 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
-            title={accounts.length === 0 ? "Connect an Instagram account first" : ""}
+            title={accounts.length === 0 ? "Connect an Instagram account first" : !hasAccount ? "Select an Instagram account first" : ""}
           >
             {pendingAction === "schedule" ? (
               <span className="flex items-center gap-2">
@@ -745,6 +750,11 @@ export default function CreatePost() {
           </button>
 
           {!file && <p className="text-xs text-slate-600">Select an image and enter a caption.</p>}
+          {file && caption.trim() && !hasAccount && (
+            <p className="w-full text-xs text-amber-400">
+              Select an Instagram account before publishing or scheduling.
+            </p>
+          )}
         </div>
       )}
 

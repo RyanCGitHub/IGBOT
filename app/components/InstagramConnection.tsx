@@ -96,7 +96,9 @@ export default function InstagramConnection() {
             Instagram Connection
           </h2>
           <p className="mt-1 text-sm text-slate-400">
-            Connect your Instagram Business account to enable publishing.
+            Your connected Instagram accounts. Each post publishes to the account
+            assigned to it. Add another to manage multiple accounts — Meta only
+            returns Facebook Pages linked to an Instagram Business or Creator account.
           </p>
         </div>
         <span className="rounded-full bg-slate-800 px-3 py-1 text-xs uppercase tracking-[0.25em] text-slate-300">

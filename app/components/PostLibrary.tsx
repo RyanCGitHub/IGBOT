@@ -569,6 +569,7 @@ export default function PostLibrary() {
   const [error, setError]         = useState<string | null>(null);
   const [showArchived, setShowArchived] = useState(false);
   const [accounts, setAccounts]   = useState<ConnectedAccount[]>([]);
+  const [accountFilter, setAccountFilter] = useState<number | "all" | "none">("all");
 
   const [publishingId, setPublishingId]               = useState<number | null>(null);
   const [publishErrors, setPublishErrors]             = useState<Record<number, string>>({});
@@ -901,9 +902,14 @@ export default function PostLibrary() {
   }
 
   // ── Derived state ─────────────────────────────────────────────────────────
-  const visiblePosts = showArchived
-    ? posts
-    : posts.filter(p => p.status !== "archived");
+  const visiblePosts = posts.filter(p => {
+    // Archive visibility
+    if (!showArchived && p.status === "archived") return false;
+    // Account filter
+    if (accountFilter === "all") return true;
+    if (accountFilter === "none") return p.account_id == null;
+    return p.account_id === accountFilter;
+  });
 
   const archivedCount = posts.filter(p => p.status === "archived").length;
   const publishedOrRepublished = posts.filter(
@@ -933,6 +939,23 @@ export default function PostLibrary() {
           <span className="rounded-full bg-slate-800 px-3 py-1 text-xs uppercase tracking-[0.25em] text-slate-300">
             {isLoading ? "…" : `${counts.total} posts`}
           </span>
+          {accounts.length > 0 && (
+            <select
+              value={String(accountFilter)}
+              onChange={e => {
+                const v = e.target.value;
+                setAccountFilter(v === "all" || v === "none" ? v : Number(v));
+              }}
+              title="Filter posts by Instagram account"
+              className="rounded-3xl bg-slate-800 px-3 py-1.5 text-xs font-semibold text-slate-200 outline-none ring-1 ring-white/10 transition hover:bg-slate-700 focus:ring-fuchsia-500/40"
+            >
+              <option value="all">All accounts</option>
+              {accounts.map(a => (
+                <option key={a.id} value={a.id}>@{a.account_name}</option>
+              ))}
+              <option value="none">No account assigned</option>
+            </select>
+          )}
           {archivedCount > 0 && (
             <button
               type="button"
