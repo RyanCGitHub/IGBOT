@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase-server";
 import { requireApiKey } from "@/lib/auth";
+import { normalizeForInstagram } from "@/lib/image-normalize";
 
-const MAX_BYTES = 8 * 1024 * 1024; // 8 MB — Instagram Graph API limit
+const MAX_BYTES = 8 * 1024 * 1024;
+const ACCEPTED_TYPES = ["image/jpeg", "image/jpg", "image/png"];
 
 export async function POST(request: Request) {
   const authError = requireApiKey(request);
@@ -20,26 +22,33 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: false, error: "No file provided." }, { status: 400 });
   }
 
-  if (!["image/jpeg", "image/jpg"].includes(file.type)) {
+  if (!ACCEPTED_TYPES.includes(file.type)) {
     return NextResponse.json(
-      { success: false, error: "Only JPEG images are supported by the Instagram Graph API." },
+      { success: false, error: `Unsupported file type: ${file.type}. Upload a JPEG or PNG.` },
       { status: 400 }
     );
   }
 
   if (file.size > MAX_BYTES) {
-    return NextResponse.json(
-      { success: false, error: "Image must be 8 MB or smaller." },
-      { status: 400 }
-    );
+    return NextResponse.json({ success: false, error: "Image must be 8 MB or smaller." }, { status: 400 });
   }
 
-  const path = `uploads/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
-  const buffer = Buffer.from(await file.arrayBuffer());
+  let normalized: Awaited<ReturnType<typeof normalizeForInstagram>>;
+  try {
+    const inputBuffer: Buffer = Buffer.from(new Uint8Array(await file.arrayBuffer()));
+    normalized = await normalizeForInstagram(inputBuffer, file.type);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error("[IG Upload] Normalization error:", msg);
+    return NextResponse.json({ success: false, error: `Image processing failed: ${msg}` }, { status: 500 });
+  }
+
+  const { buffer, meta } = normalized;
+  const storagePath = `uploads/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
 
   const { data, error } = await supabaseServer.storage
     .from("instagram-media")
-    .upload(path, buffer, { contentType: "image/jpeg", upsert: false });
+    .upload(storagePath, buffer, { contentType: "image/jpeg", upsert: false });
 
   if (error) {
     console.error("[IG Upload] Storage error:", error.message);
@@ -53,7 +62,17 @@ export async function POST(request: Request) {
     .from("instagram-media")
     .getPublicUrl(data.path);
 
-  console.log("[IG Upload] Uploaded:", urlData.publicUrl);
+  console.log(
+    `[IG Upload] ${meta.originalWidth}×${meta.originalHeight} (${meta.originalAspectRatio}) →`,
+    `${meta.finalWidth}×${meta.finalHeight} (${meta.finalAspectRatio})`,
+    `| shape: ${meta.targetShape}`,
+    `| cropped: ${meta.wasCropped} | padded: ${meta.wasPadded} | converted: ${meta.wasConverted}`
+  );
 
-  return NextResponse.json({ success: true, imageUrl: urlData.publicUrl, path: data.path });
+  return NextResponse.json({
+    success: true,
+    imageUrl: urlData.publicUrl,
+    path: data.path,
+    normalization: meta,
+  });
 }
