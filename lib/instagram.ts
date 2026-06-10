@@ -193,3 +193,121 @@ export async function getMediaPermalink(
   if (!res.ok || !data.permalink) return { error: data.error?.message ?? `HTTP ${res.status}` };
   return { permalink: data.permalink };
 }
+
+// ─── Get media insights (analytics — read-only) ───────────────────────────────
+
+export type MediaInsights = {
+  likes: number | null;
+  comments: number | null;
+  reach: number | null;
+  impressions: number | null;
+  saves: number | null;
+  shares: number | null;
+  views: number | null;
+  raw: Record<string, unknown>;
+  insightsError: string | null;
+};
+
+// Conservative metric set valid for single-image FEED posts. Requesting an
+// unsupported metric fails the ENTIRE insights call, so we keep this minimal and
+// degrade gracefully — likes/comments always come from the media fields below.
+const IMAGE_INSIGHT_METRICS = ["reach", "saved", "shares", "total_interactions"] as const;
+
+export async function getMediaInsights(
+  mediaId: string,
+  accessToken: string,
+  log: PublishLogger
+): Promise<MediaInsights | { error: string }> {
+  const raw: Record<string, unknown> = {};
+
+  // ── 1) Media fields: like_count, comments_count (reliable for owned media) ──
+  const fieldsUrl = `https://graph.facebook.com/v21.0/${mediaId}?fields=like_count,comments_count&access_token=${accessToken}`;
+  const fieldsDisplay = `https://graph.facebook.com/v21.0/${mediaId}?fields=like_count,comments_count&access_token=[REDACTED]`;
+
+  log.add({
+    step: 'insights_fields',
+    status: 'info',
+    detail: `GET /v21.0/${mediaId}?fields=like_count,comments_count`,
+    request: { url: fieldsDisplay },
+  });
+
+  let likes: number | null = null;
+  let comments: number | null = null;
+  try {
+    const res = await fetch(fieldsUrl);
+    const data = (await res.json()) as { like_count?: number; comments_count?: number } & IGError;
+    raw.fields = data;
+
+    log.add({
+      step: 'insights_fields_response',
+      status: res.ok && !data.error ? 'success' : 'error',
+      detail: res.ok && !data.error
+        ? `like_count=${data.like_count ?? '?'} comments_count=${data.comments_count ?? '?'}`
+        : `Failed — ${data.error?.message ?? `HTTP ${res.status}`}`,
+      response: { status: res.status, body: data },
+    });
+
+    if (!res.ok || data.error) return { error: data.error?.message ?? `HTTP ${res.status}` };
+    likes = typeof data.like_count === 'number' ? data.like_count : null;
+    comments = typeof data.comments_count === 'number' ? data.comments_count : null;
+  } catch (e) {
+    return { error: `Network error fetching media fields: ${e instanceof Error ? e.message : String(e)}` };
+  }
+
+  // ── 2) Insights metrics (degrade gracefully if unavailable) ────────────────
+  const metricParam = IMAGE_INSIGHT_METRICS.join(',');
+  const insightsUrl = `https://graph.facebook.com/v21.0/${mediaId}/insights?metric=${metricParam}&access_token=${accessToken}`;
+  const insightsDisplay = `https://graph.facebook.com/v21.0/${mediaId}/insights?metric=${metricParam}&access_token=[REDACTED]`;
+
+  log.add({
+    step: 'insights_metrics',
+    status: 'info',
+    detail: `GET /v21.0/${mediaId}/insights?metric=${metricParam}`,
+    request: { url: insightsDisplay },
+  });
+
+  let reach: number | null = null;
+  let saves: number | null = null;
+  let shares: number | null = null;
+  let insightsError: string | null = null;
+
+  try {
+    const res = await fetch(insightsUrl);
+    const data = (await res.json()) as {
+      data?: Array<{ name?: string; values?: Array<{ value?: number }> }>;
+    } & IGError;
+    raw.insights = data;
+
+    if (!res.ok || data.error) {
+      // Unsupported metric or other insights error — keep likes/comments, note it.
+      insightsError = data.error?.message ?? `HTTP ${res.status}`;
+      log.add({
+        step: 'insights_metrics_response',
+        status: 'error',
+        detail: `Insights unavailable — ${insightsError} (likes/comments still recorded)`,
+        response: { status: res.status, body: data },
+      });
+    } else {
+      const map = new Map<string, number>();
+      for (const m of data.data ?? []) {
+        if (m.name && typeof m.values?.[0]?.value === 'number') map.set(m.name, m.values[0].value);
+      }
+      reach = map.get('reach') ?? null;
+      saves = map.get('saved') ?? null;
+      shares = map.get('shares') ?? null;
+      log.add({
+        step: 'insights_metrics_response',
+        status: 'success',
+        detail: `reach=${reach ?? '?'} saved=${saves ?? '?'} shares=${shares ?? '?'}`,
+        response: { status: res.status, body: data },
+      });
+    }
+  } catch (e) {
+    insightsError = `Network error fetching insights: ${e instanceof Error ? e.message : String(e)}`;
+    log.add({ step: 'insights_metrics_response', status: 'error', detail: insightsError });
+  }
+
+  // impressions/views are intentionally not requested for single-image posts
+  // (impressions is deprecated in v21; views/plays apply to video). Left null.
+  return { likes, comments, reach, impressions: null, saves, shares, views: null, raw, insightsError };
+}

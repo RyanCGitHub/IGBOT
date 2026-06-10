@@ -73,6 +73,27 @@ export type ScheduleSuggestion = {
   theme: string;
 };
 
+// ─── Post insights (Phase 8 analytics) ──────────────────────────────────────────
+// One snapshot row per post (unique post_id). Metric columns are nullable —
+// Instagram does not return every metric for every media type.
+export type PostInsights = {
+  id: number;
+  post_id: number;
+  media_id: string | null;
+  likes: number | null;
+  comments: number | null;
+  reach: number | null;
+  impressions: number | null;
+  saves: number | null;
+  shares: number | null;
+  views: number | null;
+  raw: Record<string, unknown> | null;
+  insights_error: string | null;
+  synced_at: string;
+  created_at: string;
+  updated_at: string;
+};
+
 export type PostStatus = 'draft' | 'approved' | 'scheduled' | 'posted';
 
 // Single source of truth — import this in every route that validates status.
