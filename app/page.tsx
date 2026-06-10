@@ -14,6 +14,7 @@ import ContentQueue from "@/app/components/ContentQueue";
 import SchedulingAssistant from "@/app/components/SchedulingAssistant";
 import Analytics from "@/app/components/Analytics";
 import PerformanceReview from "@/app/components/PerformanceReview";
+import ApprovalQueue from "@/app/components/ApprovalQueue";
 import { apiFetch } from "@/lib/api-fetch";
 
 export default function Home() {
@@ -324,6 +325,8 @@ export default function Home() {
         </section>
 
         <InstagramConnection />
+
+        <ApprovalQueue />
 
         <Campaigns />
 
