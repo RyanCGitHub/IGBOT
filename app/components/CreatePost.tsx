@@ -21,7 +21,7 @@ type LogEntry = {
   timestamp: string;
 };
 
-type ActionPhase = "idle" | "uploading" | "saving" | "publishing" | "done_draft" | "done_published" | "error";
+type ActionPhase = "idle" | "uploading" | "saving" | "publishing" | "scheduling" | "done_draft" | "done_published" | "done_scheduled" | "error";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -224,6 +224,12 @@ export default function CreatePost() {
   const [publishedPermalink, setPublishedPermalink] = useState<string | null>(null);
   const [publishLogs, setPublishLogs]         = useState<LogEntry[] | null>(null);
 
+  // Scheduling
+  const [showSchedulePicker, setShowSchedulePicker] = useState(false);
+  const [scheduleInput, setScheduleInput]           = useState("");
+  const [scheduleTz] = useState(() => Intl.DateTimeFormat().resolvedOptions().timeZone);
+  const [scheduleError, setScheduleError]           = useState<string | null>(null);
+
   // Load accounts on mount
   useEffect(() => {
     apiFetch("/api/meta/accounts")
@@ -253,6 +259,9 @@ export default function CreatePost() {
     setPublishedMediaId(null);
     setPublishedPermalink(null);
     setPublishLogs(null);
+    setShowSchedulePicker(false);
+    setScheduleInput("");
+    setScheduleError(null);
 
     if (!f) { setFile(null); setLocalPreview(null); return; }
     setFile(f);
@@ -390,12 +399,62 @@ export default function CreatePost() {
     }
   }
 
+  async function handleSchedule() {
+    if (!file || !caption.trim() || !scheduleInput) return;
+
+    // Validate time is in the future
+    const scheduledDate = new Date(scheduleInput);
+    if (isNaN(scheduledDate.getTime())) {
+      setScheduleError("Please enter a valid date and time.");
+      return;
+    }
+    if (scheduledDate <= new Date()) {
+      setScheduleError("Scheduled time must be in the future.");
+      return;
+    }
+    setScheduleError(null);
+    setActionPhase("uploading");
+    setActionError(null);
+
+    try {
+      const uploaded = await uploadImage();
+      if (!uploaded) throw new Error("Upload returned no data.");
+
+      setActionPhase("scheduling");
+      const res = await apiFetch("/api/ig-posts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          caption: caption.trim(),
+          image_url: uploaded.imageUrl,
+          image_storage_path: uploaded.path,
+          image_analysis: analysis ?? undefined,
+          caption_options: captionOptions ?? undefined,
+          normalization_meta: uploaded.normalization as unknown as Record<string, unknown>,
+          account_id: selectedAccountId ?? undefined,
+          status: "scheduled",
+          scheduled_at: scheduledDate.toISOString(),
+          timezone: scheduleTz,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error ?? "Schedule failed.");
+
+      setSavedPost(data.post as IgPost);
+      setActionPhase("done_scheduled");
+      setShowSchedulePicker(false);
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : String(e));
+      setActionPhase("error");
+    }
+  }
+
   function handleReset() {
     handleFileChange(null);
   }
 
-  const isWorking  = ["uploading", "saving", "publishing"].includes(actionPhase);
-  const isDone     = actionPhase === "done_draft" || actionPhase === "done_published";
+  const isWorking  = ["uploading", "saving", "publishing", "scheduling"].includes(actionPhase);
+  const isDone     = actionPhase === "done_draft" || actionPhase === "done_published" || actionPhase === "done_scheduled";
   const canAnalyze = !!file && !isAnalyzing && !isWorking && !isDone;
   const canSave    = !!file && !!caption.trim() && !isWorking && !isDone;
 
@@ -404,8 +463,10 @@ export default function CreatePost() {
     uploading: "Processing & uploading image…",
     saving: "Saving post…",
     publishing: "Publishing to Instagram… (up to 60s)",
+    scheduling: "Scheduling post…",
     done_draft: "",
     done_published: "",
+    done_scheduled: "",
     error: "",
   };
 
@@ -637,7 +698,61 @@ export default function CreatePost() {
             ) : "Publish Now"}
           </button>
 
+          <button
+            type="button"
+            onClick={() => { setShowSchedulePicker(s => !s); setScheduleError(null); }}
+            disabled={!canSave || accounts.length === 0}
+            className="rounded-3xl border border-slate-600 bg-slate-800 px-5 py-2.5 text-sm font-semibold text-slate-200 transition hover:border-fuchsia-500/50 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+            title={accounts.length === 0 ? "Connect an Instagram account first" : ""}
+          >
+            {actionPhase === "scheduling" ? (
+              <span className="flex items-center gap-2">
+                <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                Scheduling…
+              </span>
+            ) : showSchedulePicker ? "Cancel Schedule" : "Schedule Post"}
+          </button>
+
           {!file && <p className="text-xs text-slate-600">Select an image and enter a caption.</p>}
+        </div>
+      )}
+
+      {/* ── Inline schedule picker ───────────────────────────────────────────── */}
+      {showSchedulePicker && !isDone && (
+        <div className="mt-4 rounded-3xl border border-fuchsia-500/20 bg-slate-950/60 p-4 space-y-3">
+          <p className="text-sm font-semibold text-fuchsia-300">Schedule Post</p>
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-slate-400">Date &amp; Time <span className="text-slate-600">({scheduleTz})</span></label>
+            <input
+              type="datetime-local"
+              value={scheduleInput}
+              onChange={e => { setScheduleInput(e.target.value); setScheduleError(null); }}
+              min={new Date(Date.now() + 60_000).toISOString().slice(0, 16)}
+              disabled={isWorking}
+              className="w-full rounded-2xl bg-slate-800/80 px-4 py-2.5 text-sm text-slate-100 outline-none ring-1 ring-white/10 focus:ring-fuchsia-500/40 disabled:opacity-50 [color-scheme:dark]"
+            />
+          </div>
+          {scheduleError && (
+            <p className="text-xs text-rose-400">{scheduleError}</p>
+          )}
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={handleSchedule}
+              disabled={!scheduleInput || isWorking}
+              className="rounded-3xl bg-fuchsia-500 px-5 py-2 text-sm font-semibold text-white transition hover:bg-fuchsia-400 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Confirm Schedule
+            </button>
+            <button
+              type="button"
+              onClick={() => { setShowSchedulePicker(false); setScheduleInput(""); setScheduleError(null); }}
+              disabled={isWorking}
+              className="rounded-3xl bg-slate-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-600 disabled:opacity-40"
+            >
+              Cancel
+            </button>
+          </div>
         </div>
       )}
 
@@ -683,6 +798,31 @@ export default function CreatePost() {
               Create Another Post
             </button>
           </div>
+        </div>
+      )}
+
+      {/* ── Outcome: Scheduled ──────────────────────────────────────────────── */}
+      {actionPhase === "done_scheduled" && savedPost && (
+        <div className="mt-6 rounded-3xl border border-fuchsia-500/30 bg-fuchsia-500/10 p-4">
+          <p className="text-sm font-semibold text-fuchsia-300">Post scheduled!</p>
+          {savedPost.scheduled_at && (
+            <p className="mt-1 text-xs text-slate-300">
+              Publishes at:{" "}
+              <span className="font-medium text-fuchsia-200">
+                {new Date(savedPost.scheduled_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}
+              </span>
+              {savedPost.timezone && <span className="text-slate-500"> ({savedPost.timezone})</span>}
+            </p>
+          )}
+          <p className="mt-1 font-mono text-xs text-fuchsia-200/60">Post ID: {savedPost.id}</p>
+          <p className="mt-1 text-xs text-slate-400">You can manage it in the Post Library below.</p>
+          <button
+            type="button"
+            onClick={handleReset}
+            className="mt-3 rounded-3xl bg-slate-700 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-600"
+          >
+            Create Another Post
+          </button>
         </div>
       )}
 

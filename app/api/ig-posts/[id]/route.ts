@@ -46,6 +46,9 @@ export async function PATCH(
     "original_media_id", "republished_from_media_id",
     "deleted_at", "deleted_detected_at", "last_instagram_sync_at", "sync_error_message",
     "archived_at", "previous_status",
+    "scheduled_at", "timezone", "schedule_error_message",
+    "last_schedule_attempt_at", "schedule_attempt_count",
+    "scheduled_by", "published_by_scheduler",
   ];
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
   for (const key of allowed) {

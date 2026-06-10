@@ -114,6 +114,14 @@ export type IgPost = {
   // archive
   previous_status: IgPostStatus | null;
   archived_at: string | null;
+  // scheduling
+  scheduled_at: string | null;
+  timezone: string | null;
+  schedule_error_message: string | null;
+  last_schedule_attempt_at: string | null;
+  schedule_attempt_count: number;
+  scheduled_by: string | null;
+  published_by_scheduler: boolean;
   created_at: string;
   updated_at: string;
 };

@@ -70,6 +70,15 @@ type SyncAllResult = {
   errorCount: number;
 };
 
+type SchedulerResult = {
+  serverTime: string;
+  checked: number;
+  published: number;
+  failed: number;
+  skipped: number;
+  errors: { id: number; error: string }[];
+};
+
 // ─── PostRow ──────────────────────────────────────────────────────────────────
 
 function PostRow({
@@ -82,6 +91,8 @@ function PostRow({
   onUnarchive,
   onSaveCaption,
   onSync,
+  onReschedule,
+  onUnschedule,
   isPublishing,
   isDeletingRow,
   isDeletingInstagram,
@@ -89,9 +100,12 @@ function PostRow({
   isArchiving,
   isUnarchiving,
   isSyncing,
+  isRescheduling,
+  isUnscheduling,
   publishError,
   deleteInstagramError,
   syncError,
+  rescheduleError,
 }: {
   post: IgPost;
   onPublish: (id: number) => void;
@@ -102,6 +116,8 @@ function PostRow({
   onUnarchive: (id: number) => void;
   onSaveCaption: (id: number, caption: string) => void;
   onSync: (id: number) => void;
+  onReschedule: (id: number, scheduledAt: string) => void;
+  onUnschedule: (id: number) => void;
   isPublishing: boolean;
   isDeletingRow: boolean;
   isDeletingInstagram: boolean;
@@ -109,13 +125,20 @@ function PostRow({
   isArchiving: boolean;
   isUnarchiving: boolean;
   isSyncing: boolean;
+  isRescheduling: boolean;
+  isUnscheduling: boolean;
   publishError: string | null;
   deleteInstagramError: string | null;
   syncError: string | null;
+  rescheduleError: string | null;
 }) {
   const [isEditing, setIsEditing] = useState(false);
   const [editCaption, setEditCaption] = useState(post.caption);
   const [isSaving, setIsSaving] = useState(false);
+  const [showReschedulePicker, setShowReschedulePicker] = useState(false);
+  const [rescheduleInput, setRescheduleInput] = useState("");
+  const [localRescheduleError, setLocalRescheduleError] = useState<string | null>(null);
+  const [showScheduleDebug, setShowScheduleDebug] = useState(false);
 
   async function saveCaption() {
     setIsSaving(true);
@@ -127,10 +150,11 @@ function PostRow({
     }
   }
 
+  const isScheduled = post.status === "scheduled";
   const canPublish = post.status === "draft" || post.status === "ready" || post.status === "failed";
   const canRepublish = post.status === "deleted_on_instagram" || post.status === "deleted_by_dashboard";
-  const canDeleteFromInstagram = post.status === "published" || post.status === "republished";
-  const canSync = post.status === "published" || post.status === "republished";
+  const canDeleteFromInstagram = (post.status === "published" || post.status === "republished") && !isScheduled;
+  const canSync = (post.status === "published" || post.status === "republished") && !isScheduled;
   const canArchive = post.status !== "archived" && post.status !== "publishing" && post.status !== "republishing";
   const isInProgress = post.status === "publishing" || post.status === "republishing";
   const isDeletedState = post.status === "deleted_on_instagram" || post.status === "deleted_by_dashboard";
@@ -199,6 +223,15 @@ function PostRow({
           {/* Meta row */}
           <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
             <span>{formatRelative(post.created_at)}</span>
+            {isScheduled && post.scheduled_at && (
+              <span className="text-violet-400">
+                Scheduled for:{" "}
+                <span className="font-medium">
+                  {new Date(post.scheduled_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}
+                </span>
+                {post.timezone && <span className="text-slate-600"> ({post.timezone})</span>}
+              </span>
+            )}
             {post.permalink && !isDeletedState && (
               <a
                 href={post.permalink}
@@ -266,6 +299,46 @@ function PostRow({
               Previous error: {post.sync_error_message}
             </p>
           )}
+          {rescheduleError && (
+            <p className="mt-1.5 rounded-xl border border-violet-500/30 bg-violet-500/10 px-2 py-1 text-xs text-violet-300">
+              {rescheduleError}
+            </p>
+          )}
+          {isScheduled && post.schedule_error_message && (
+            <p className="mt-1.5 rounded-xl border border-rose-500/30 bg-rose-500/10 px-2 py-1 text-xs text-rose-300">
+              Schedule error: {post.schedule_error_message}
+            </p>
+          )}
+
+          {/* Schedule debug collapsible — shown for all scheduled posts */}
+          {isScheduled && (
+            <div className="mt-2">
+              <button
+                type="button"
+                onClick={() => setShowScheduleDebug(v => !v)}
+                className="text-[10px] text-slate-600 hover:text-slate-400"
+              >
+                {showScheduleDebug ? "▲ hide scheduler debug" : "▼ scheduler debug"}
+              </button>
+              {showScheduleDebug && (() => {
+                const isDue = post.scheduled_at ? new Date(post.scheduled_at) <= new Date() : false;
+                return (
+                  <div className="mt-1 space-y-0.5 font-mono text-[10px] text-slate-500">
+                    <p>scheduled_at (UTC): <span className="text-slate-300">{post.scheduled_at ?? "—"}</span></p>
+                    <p>client time (UTC): <span className="text-slate-300">{new Date().toISOString()}</span></p>
+                    <p>due now: <span className={isDue ? "text-emerald-400" : "text-amber-400"}>{isDue ? "yes — scheduler should pick this up" : "not yet"}</span></p>
+                    <p>attempts: <span className="text-slate-300">{post.schedule_attempt_count}</span></p>
+                    {post.last_schedule_attempt_at && (
+                      <p>last attempt: <span className="text-slate-300">{post.last_schedule_attempt_at}</span></p>
+                    )}
+                    {post.published_by_scheduler && (
+                      <p className="text-emerald-500">published by scheduler</p>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
+          )}
         </div>
 
         {/* Status badge + action buttons */}
@@ -276,13 +349,49 @@ function PostRow({
 
           <div className="flex flex-col gap-1.5">
             {/* Edit caption */}
-            {!isEditing && !isInProgress && !isArchived && post.status !== "published" && post.status !== "republished" && (
+            {!isEditing && !isInProgress && !isArchived && !isScheduled && post.status !== "published" && post.status !== "republished" && (
               <button
                 type="button"
                 onClick={() => setIsEditing(true)}
                 className="rounded-2xl bg-slate-800 px-3 py-1 text-xs text-slate-300 hover:bg-slate-700"
               >
                 Edit
+              </button>
+            )}
+
+            {/* Publish Now (for scheduled posts) */}
+            {isScheduled && (
+              <button
+                type="button"
+                onClick={() => onPublish(post.id)}
+                disabled={isPublishing}
+                className="rounded-2xl bg-fuchsia-500 px-3 py-1 text-xs font-semibold text-white hover:bg-fuchsia-400 disabled:opacity-50"
+              >
+                {isPublishing ? <Spinner label="Publishing…" /> : "Publish Now"}
+              </button>
+            )}
+
+            {/* Reschedule */}
+            {isScheduled && (
+              <button
+                type="button"
+                onClick={() => { setShowReschedulePicker(v => !v); setLocalRescheduleError(null); }}
+                disabled={isRescheduling}
+                className="rounded-2xl bg-slate-700 px-3 py-1 text-xs text-violet-300 hover:bg-violet-500/20 disabled:opacity-50"
+              >
+                {isRescheduling ? <Spinner label="Rescheduling…" /> : showReschedulePicker ? "Cancel" : "Reschedule"}
+              </button>
+            )}
+
+            {/* Unschedule (back to draft) */}
+            {isScheduled && (
+              <button
+                type="button"
+                onClick={() => onUnschedule(post.id)}
+                disabled={isUnscheduling}
+                className="rounded-2xl bg-slate-800 px-3 py-1 text-xs text-slate-400 hover:bg-slate-700 disabled:opacity-50"
+              >
+                {isUnscheduling ? "…" : "Unschedule"}
               </button>
             )}
 
@@ -390,6 +499,47 @@ function PostRow({
           </div>
         </div>
       </div>
+
+      {/* Inline reschedule picker */}
+      {showReschedulePicker && isScheduled && (
+        <div className="mx-4 mb-4 rounded-2xl border border-violet-500/20 bg-slate-900/60 p-3 space-y-2">
+          <p className="text-xs font-semibold text-violet-300">Pick a new date &amp; time</p>
+          <input
+            type="datetime-local"
+            value={rescheduleInput}
+            onChange={e => { setRescheduleInput(e.target.value); setLocalRescheduleError(null); }}
+            min={new Date(Date.now() + 60_000).toISOString().slice(0, 16)}
+            className="w-full rounded-xl bg-slate-800/80 px-3 py-2 text-sm text-slate-100 outline-none ring-1 ring-white/10 focus:ring-violet-500/40 [color-scheme:dark]"
+          />
+          {localRescheduleError && (
+            <p className="text-xs text-rose-400">{localRescheduleError}</p>
+          )}
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={!rescheduleInput || isRescheduling}
+              onClick={() => {
+                const d = new Date(rescheduleInput);
+                if (isNaN(d.getTime())) { setLocalRescheduleError("Invalid date."); return; }
+                if (d <= new Date()) { setLocalRescheduleError("Must be in the future."); return; }
+                setLocalRescheduleError(null);
+                setShowReschedulePicker(false);
+                onReschedule(post.id, d.toISOString());
+              }}
+              className="rounded-2xl bg-violet-500 px-4 py-1.5 text-xs font-semibold text-white hover:bg-violet-400 disabled:opacity-40"
+            >
+              Confirm
+            </button>
+            <button
+              type="button"
+              onClick={() => { setShowReschedulePicker(false); setRescheduleInput(""); setLocalRescheduleError(null); }}
+              className="rounded-2xl bg-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-600"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -423,6 +573,11 @@ export default function PostLibrary() {
   const [syncErrors, setSyncErrors]                   = useState<Record<number, string>>({});
   const [isSyncingAll, setIsSyncingAll]               = useState(false);
   const [syncAllResult, setSyncAllResult]             = useState<SyncAllResult | null>(null);
+  const [isRunningScheduler, setIsRunningScheduler]   = useState(false);
+  const [schedulerResult, setSchedulerResult]         = useState<SchedulerResult | null>(null);
+  const [reschedulingId, setReschedulingId]           = useState<number | null>(null);
+  const [rescheduleErrors, setRescheduleErrors]       = useState<Record<number, string>>({});
+  const [unschedulingId, setUnschedulingId]           = useState<number | null>(null);
 
   const fetchPosts = useCallback(async () => {
     setIsLoading(true);
@@ -653,6 +808,82 @@ export default function PostLibrary() {
     }
   }
 
+  // ── Run scheduler manually ────────────────────────────────────────────────
+  async function handleRunScheduler() {
+    setIsRunningScheduler(true);
+    setSchedulerResult(null);
+    try {
+      const res = await apiFetch("/api/ig-posts/process-scheduled", { method: "POST" });
+      const data = await res.json() as { success: boolean; error?: string } & Partial<SchedulerResult>;
+      if (!res.ok || !data.success) {
+        alert(data.error ?? "Scheduler failed.");
+      } else {
+        setSchedulerResult({
+          serverTime: data.serverTime ?? new Date().toISOString(),
+          checked: data.checked ?? 0,
+          published: data.published ?? 0,
+          failed: data.failed ?? 0,
+          skipped: data.skipped ?? 0,
+          errors: data.errors ?? [],
+        });
+        await fetchPosts();
+      }
+    } finally {
+      setIsRunningScheduler(false);
+    }
+  }
+
+  // ── Reschedule ────────────────────────────────────────────────────────────
+  async function handleReschedule(id: number, scheduledAt: string) {
+    setReschedulingId(id);
+    setRescheduleErrors(prev => { const n = { ...prev }; delete n[id]; return n; });
+    try {
+      const res = await apiFetch(`/api/ig-posts/${id}/schedule`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          scheduled_at: scheduledAt,
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setRescheduleErrors(prev => ({ ...prev, [id]: data.error ?? "Reschedule failed." }));
+      } else {
+        await fetchPosts();
+      }
+    } catch (e) {
+      setRescheduleErrors(prev => ({ ...prev, [id]: e instanceof Error ? e.message : "Reschedule failed." }));
+    } finally {
+      setReschedulingId(null);
+    }
+  }
+
+  // ── Unschedule (back to draft) ─────────────────────────────────────────────
+  async function handleUnschedule(id: number) {
+    setUnschedulingId(id);
+    try {
+      const res = await apiFetch(`/api/ig-posts/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          status: "draft",
+          scheduled_at: null,
+          timezone: null,
+          schedule_error_message: null,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        alert(data.error ?? "Unschedule failed.");
+      } else {
+        await fetchPosts();
+      }
+    } finally {
+      setUnschedulingId(null);
+    }
+  }
+
   // ── Derived state ─────────────────────────────────────────────────────────
   const visiblePosts = showArchived
     ? posts
@@ -666,6 +897,7 @@ export default function PostLibrary() {
   const counts = {
     total:     visiblePosts.length,
     draft:     visiblePosts.filter(p => p.status === "draft").length,
+    scheduled: visiblePosts.filter(p => p.status === "scheduled").length,
     published: visiblePosts.filter(p => p.status === "published" || p.status === "republished").length,
     deleted:   visiblePosts.filter(p => p.status === "deleted_on_instagram" || p.status === "deleted_by_dashboard").length,
     failed:    visiblePosts.filter(p => p.status === "failed").length,
@@ -710,6 +942,15 @@ export default function PostLibrary() {
           )}
           <button
             type="button"
+            onClick={handleRunScheduler}
+            disabled={isRunningScheduler || isLoading}
+            className="rounded-3xl bg-violet-700/60 px-3 py-1.5 text-xs font-semibold text-violet-200 transition hover:bg-violet-600/60 disabled:opacity-50"
+            title="Manually trigger the scheduler — publishes any due scheduled posts"
+          >
+            {isRunningScheduler ? <Spinner label="Running…" /> : "Run Scheduler Now"}
+          </button>
+          <button
+            type="button"
             onClick={fetchPosts}
             disabled={isLoading}
             className="rounded-3xl bg-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-200 transition hover:bg-slate-600 disabled:opacity-50"
@@ -728,12 +969,40 @@ export default function PostLibrary() {
         </div>
       )}
 
+      {/* Scheduler result banner */}
+      {schedulerResult && (
+        <div className={`mt-3 rounded-2xl px-4 py-3 text-xs ring-1 space-y-1 ${schedulerResult.failed > 0 ? "bg-rose-500/10 text-rose-200 ring-rose-400/20" : "bg-violet-500/10 text-violet-200 ring-violet-400/20"}`}>
+          <p className="font-semibold">
+            Scheduler ran — {schedulerResult.checked} checked · {schedulerResult.published} published · {schedulerResult.failed} failed
+            {schedulerResult.skipped > 0 && ` · ${schedulerResult.skipped} skipped`}
+          </p>
+          <p className="text-[10px] font-mono opacity-60">
+            server time: {new Date(schedulerResult.serverTime).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "medium" })}
+          </p>
+          {schedulerResult.errors.length > 0 && (
+            <ul className="mt-1 space-y-0.5">
+              {schedulerResult.errors.map(e => (
+                <li key={e.id} className="font-mono">post {e.id}: {e.error}</li>
+              ))}
+            </ul>
+          )}
+          {schedulerResult.checked === 0 && (
+            <p className="opacity-70">No posts were due. Check that scheduled_at is in the past (UTC) and status is &quot;scheduled&quot;.</p>
+          )}
+        </div>
+      )}
+
       {/* Stats pills */}
       {!isLoading && visiblePosts.length > 0 && (
         <div className="mt-4 flex flex-wrap gap-2">
           {counts.draft > 0 && (
             <span className="rounded-full bg-slate-700/60 px-3 py-1 text-xs text-slate-300 ring-1 ring-slate-500/20">
               {counts.draft} draft{counts.draft !== 1 ? "s" : ""}
+            </span>
+          )}
+          {counts.scheduled > 0 && (
+            <span className="rounded-full bg-violet-500/10 px-3 py-1 text-xs text-violet-300 ring-1 ring-violet-400/20">
+              {counts.scheduled} scheduled
             </span>
           )}
           {counts.published > 0 && (
@@ -781,6 +1050,8 @@ export default function PostLibrary() {
               onUnarchive={handleUnarchive}
               onSaveCaption={handleSaveCaption}
               onSync={handleSync}
+              onReschedule={handleReschedule}
+              onUnschedule={handleUnschedule}
               isPublishing={publishingId === post.id}
               isDeletingRow={deletingRowId === post.id}
               isDeletingInstagram={deletingInstagramId === post.id}
@@ -788,9 +1059,12 @@ export default function PostLibrary() {
               isArchiving={archivingId === post.id}
               isUnarchiving={unarchivingId === post.id}
               isSyncing={syncingId === post.id}
+              isRescheduling={reschedulingId === post.id}
+              isUnscheduling={unschedulingId === post.id}
               publishError={publishErrors[post.id] ?? null}
               deleteInstagramError={deleteInstagramErrors[post.id] ?? null}
               syncError={syncErrors[post.id] ?? null}
+              rescheduleError={rescheduleErrors[post.id] ?? null}
             />
           ))
         )}

@@ -1,0 +1,258 @@
+// Shared publish logic used by both the manual publish route and the scheduler.
+// Returns a typed result instead of an HTTP response so callers decide how to surface it.
+
+import { supabaseServer } from "@/lib/supabase-server";
+import {
+  createLogger,
+  createMediaContainer,
+  pollContainerStatus,
+  publishContainer,
+  getMediaPermalink,
+  type LogEntry,
+  type PublishLogger,
+} from "@/lib/instagram";
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+export type PublishResult =
+  | {
+      success: true;
+      mediaId: string;
+      permalink: string | undefined;
+      jobId: number | undefined;
+      isRepublish: boolean;
+      logs: LogEntry[];
+    }
+  | {
+      success: false;
+      error: string;
+      // Hint for the HTTP layer — not used by the scheduler
+      httpStatus: 400 | 401 | 404 | 409 | 502;
+      logs: LogEntry[];
+    };
+
+export type PublishOptions = {
+  accountIdOverride?: number;
+  isScheduled?: boolean;
+};
+
+// ─── Publishable statuses ─────────────────────────────────────────────────────
+
+const PUBLISHABLE_STATUSES = new Set([
+  "draft", "ready", "failed",
+  "scheduled",
+  "deleted_on_instagram", "deleted_by_dashboard",
+]);
+
+// ─── Main function ────────────────────────────────────────────────────────────
+
+export async function publishIgPost(
+  postId: number,
+  options: PublishOptions = {}
+): Promise<PublishResult> {
+  const { accountIdOverride, isScheduled = false } = options;
+
+  // ── Fetch post ──────────────────────────────────────────────────────────────
+  const { data: post, error: postErr } = await supabaseServer
+    .from("ig_posts")
+    .select("id, caption, image_url, account_id, status, media_id, original_media_id")
+    .eq("id", postId)
+    .single();
+
+  if (postErr || !post) {
+    return err("Post not found.", 404);
+  }
+  if (!post.image_url) {
+    return err("Post has no image — upload an image first.", 400);
+  }
+  if (!post.caption?.trim()) {
+    return err("Post has no caption.", 400);
+  }
+  if (post.status === "published" || post.status === "republished") {
+    return err("Post is already published.", 409);
+  }
+  if (post.status === "publishing" || post.status === "republishing") {
+    return err("Post is already being published.", 409);
+  }
+  if (!PUBLISHABLE_STATUSES.has(post.status)) {
+    return err(`Cannot publish a post with status "${post.status}".`, 400);
+  }
+
+  const isRepublish =
+    post.status === "deleted_on_instagram" ||
+    post.status === "deleted_by_dashboard";
+
+  // ── Fetch account ───────────────────────────────────────────────────────────
+  const resolvedAccountId = accountIdOverride ?? post.account_id;
+  const accountRes = resolvedAccountId
+    ? await supabaseServer
+        .from("connected_accounts")
+        .select("id, account_name, ig_user_id, access_token")
+        .eq("id", resolvedAccountId)
+        .single()
+    : await supabaseServer
+        .from("connected_accounts")
+        .select("id, account_name, ig_user_id, access_token")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .single();
+
+  if (accountRes.error || !accountRes.data) {
+    return err("No connected Instagram account found. Connect an account first.", 400);
+  }
+  const account = accountRes.data;
+
+  // ── Mark in-progress ────────────────────────────────────────────────────────
+  const inProgressStatus = isRepublish ? "republishing" : "publishing";
+  await supabaseServer
+    .from("ig_posts")
+    .update({ status: inProgressStatus, updated_at: new Date().toISOString() })
+    .eq("id", postId);
+
+  const log = createLogger();
+  log.add({
+    step: "fetch_account",
+    status: "success",
+    detail: [
+      isRepublish ? "Republishing" : isScheduled ? "Scheduled publish" : "Publishing",
+      `as @${account.account_name} (IG user ${account.ig_user_id})`,
+    ].join(" "),
+  });
+  if (isRepublish) {
+    log.add({
+      step: "republish_context",
+      status: "info",
+      detail: `Republishing — old media_id: ${post.media_id ?? "unknown"}`,
+    });
+  }
+  if (isScheduled) {
+    log.add({ step: "scheduler", status: "info", detail: `Published by scheduler for post ${postId}` });
+  }
+
+  // ── Create container ────────────────────────────────────────────────────────
+  const containerResult = await createMediaContainer(
+    account.ig_user_id, account.access_token, post.image_url, post.caption, log
+  );
+  if ("error" in containerResult) {
+    await failPost(postId, containerResult.error, log);
+    return { success: false, error: containerResult.error, httpStatus: 502, logs: log.all() };
+  }
+
+  // ── Poll ────────────────────────────────────────────────────────────────────
+  const pollResult = await pollContainerStatus(containerResult.containerId, account.access_token, log);
+  if ("error" in pollResult) {
+    await failPost(postId, pollResult.error, log);
+    return { success: false, error: pollResult.error, httpStatus: 502, logs: log.all() };
+  }
+
+  // ── Publish ─────────────────────────────────────────────────────────────────
+  const publishResult = await publishContainer(
+    account.ig_user_id, containerResult.containerId, account.access_token, log
+  );
+  if ("error" in publishResult) {
+    await failPost(postId, publishResult.error, log);
+    return { success: false, error: publishResult.error, httpStatus: 502, logs: log.all() };
+  }
+
+  // ── Permalink (non-fatal) ───────────────────────────────────────────────────
+  const permalinkResult = await getMediaPermalink(publishResult.mediaId, account.access_token, log);
+  const permalink = "error" in permalinkResult ? undefined : permalinkResult.permalink;
+
+  // ── Persist publish_job ─────────────────────────────────────────────────────
+  const jobId = await persistJob({
+    accountId: account.id,
+    caption: post.caption,
+    imageUrl: post.image_url,
+    containerId: containerResult.containerId,
+    mediaId: publishResult.mediaId,
+    permalink,
+    log,
+  });
+
+  log.add({ step: "save_job", status: "success", detail: `Publish job saved (ID: ${jobId ?? "unknown"})` });
+
+  // ── Update ig_post ──────────────────────────────────────────────────────────
+  const now = new Date().toISOString();
+  const successStatus = isRepublish ? "republished" : "published";
+
+  const updatePayload: Record<string, unknown> = {
+    status: successStatus,
+    media_id: publishResult.mediaId,
+    permalink: permalink ?? null,
+    publish_job_id: jobId ?? null,
+    published_at: now,
+    updated_at: now,
+    error_message: null,
+    sync_error_message: null,
+    deleted_detected_at: null,
+    deleted_at: null,
+    schedule_error_message: null,
+  };
+
+  if (isScheduled) {
+    updatePayload.published_by_scheduler = true;
+  }
+
+  if (isRepublish) {
+    updatePayload.original_media_id = post.original_media_id ?? post.media_id;
+    updatePayload.republished_from_media_id = post.media_id;
+    log.add({
+      step: "republish_ids",
+      status: "info",
+      detail: `original: ${updatePayload.original_media_id ?? "none"} | from: ${post.media_id ?? "none"} | new: ${publishResult.mediaId}`,
+    });
+  }
+
+  await supabaseServer.from("ig_posts").update(updatePayload).eq("id", postId);
+  log.add({ step: "update_ig_post", status: "success", detail: `ig_post ${postId} → ${successStatus}` });
+
+  return { success: true, mediaId: publishResult.mediaId, permalink, jobId, isRepublish, logs: log.all() };
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function err(
+  message: string,
+  httpStatus: 400 | 401 | 404 | 409 | 502
+): PublishResult & { success: false } {
+  return { success: false, error: message, httpStatus, logs: [] };
+}
+
+async function failPost(postId: number, errorMessage: string, log: PublishLogger) {
+  await supabaseServer
+    .from("ig_posts")
+    .update({ status: "failed", error_message: errorMessage, updated_at: new Date().toISOString() })
+    .eq("id", postId);
+  log.add({ step: "fail_post", status: "error", detail: `ig_post ${postId} → failed: ${errorMessage}` });
+}
+
+type PersistParams = {
+  accountId: number;
+  caption: string;
+  imageUrl: string;
+  containerId?: string;
+  mediaId: string;
+  permalink?: string;
+  log: PublishLogger;
+};
+
+async function persistJob(p: PersistParams): Promise<number | undefined> {
+  const { data, error } = await supabaseServer
+    .from("publish_jobs")
+    .insert({
+      account_id: p.accountId,
+      caption: p.caption,
+      image_url: p.imageUrl,
+      container_id: p.containerId ?? null,
+      media_id: p.mediaId,
+      permalink: p.permalink ?? null,
+      status: "published",
+      log_steps: p.log.all(),
+      published_at: new Date().toISOString(),
+    })
+    .select("id")
+    .single();
+
+  if (error) console.error("[IG Publish] Failed to save publish_job:", error.message);
+  return data?.id;
+}

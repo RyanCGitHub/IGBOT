@@ -32,6 +32,10 @@ type CreateBody = {
   normalization_meta?: Record<string, unknown>;
   account_id?: number;
   status?: IgPostStatus;
+  // scheduling
+  scheduled_at?: string;
+  timezone?: string;
+  scheduled_by?: string;
 };
 
 export async function POST(request: Request) {
@@ -59,6 +63,26 @@ export async function POST(request: Request) {
   const status: IgPostStatus =
     body.status && IG_POST_VALID_STATUSES.includes(body.status) ? body.status : "draft";
 
+  // Validate scheduling fields when status=scheduled
+  if (status === "scheduled") {
+    if (!body.scheduled_at) {
+      return NextResponse.json(
+        { success: false, error: "scheduled_at is required when status is scheduled." },
+        { status: 400 }
+      );
+    }
+    const scheduledDate = new Date(body.scheduled_at);
+    if (isNaN(scheduledDate.getTime())) {
+      return NextResponse.json({ success: false, error: "scheduled_at is not a valid date." }, { status: 400 });
+    }
+    if (scheduledDate <= new Date()) {
+      return NextResponse.json(
+        { success: false, error: "scheduled_at must be in the future." },
+        { status: 400 }
+      );
+    }
+  }
+
   const { data, error } = await supabaseServer
     .from("ig_posts")
     .insert({
@@ -71,6 +95,9 @@ export async function POST(request: Request) {
       normalization_meta: body.normalization_meta ?? null,
       account_id: body.account_id ?? null,
       status,
+      scheduled_at: body.scheduled_at ?? null,
+      timezone: body.timezone ?? null,
+      scheduled_by: body.scheduled_by ?? null,
     })
     .select("*")
     .single();
