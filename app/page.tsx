@@ -9,6 +9,7 @@ import PublishHistory from "@/app/components/PublishHistory";
 import CreatePost from "@/app/components/CreatePost";
 import PostLibrary from "@/app/components/PostLibrary";
 import Campaigns from "@/app/components/Campaigns";
+import ContentPlanner from "@/app/components/ContentPlanner";
 import ContentQueue from "@/app/components/ContentQueue";
 import { apiFetch } from "@/lib/api-fetch";
 
@@ -322,6 +323,8 @@ export default function Home() {
         <InstagramConnection />
 
         <Campaigns />
+
+        <ContentPlanner />
 
         <CreatePost />
 
