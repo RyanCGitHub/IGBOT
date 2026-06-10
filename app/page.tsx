@@ -6,6 +6,8 @@ import ContentLibrary from "@/app/components/ContentLibrary";
 import InstagramConnection from "@/app/components/InstagramConnection";
 import TestPublish from "@/app/components/TestPublish";
 import PublishHistory from "@/app/components/PublishHistory";
+import CreatePost from "@/app/components/CreatePost";
+import PostLibrary from "@/app/components/PostLibrary";
 import { apiFetch } from "@/lib/api-fetch";
 
 export default function Home() {
@@ -317,9 +319,21 @@ export default function Home() {
 
         <InstagramConnection />
 
-        <TestPublish />
+        <CreatePost />
 
-        <PublishHistory />
+        <PostLibrary />
+
+        <section className="rounded-3xl border border-white/5 bg-slate-900/40 p-6">
+          <details>
+            <summary className="cursor-pointer text-sm font-semibold text-slate-500 hover:text-slate-300">
+              Developer Tools (TestPublish + Publish History)
+            </summary>
+            <div className="mt-6 space-y-6">
+              <TestPublish />
+              <PublishHistory />
+            </div>
+          </details>
+        </section>
 
         <ContentLibrary />
 

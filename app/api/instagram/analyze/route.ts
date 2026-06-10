@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { anthropic } from "@/lib/claude";
 import { requireApiKey } from "@/lib/auth";
+import type { CaptionOption } from "@/lib/supabase";
 
 const MAX_BYTES = 8 * 1024 * 1024;
 const ACCEPTED_TYPES = ["image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif"] as const;
@@ -22,7 +23,8 @@ export type ImageAnalysis = {
 export type AnalyzeResponse = {
   success: true;
   analysis: ImageAnalysis;
-  caption: string;
+  caption: string;           // backward-compat: professional option text (caption + hashtags)
+  captionOptions: CaptionOption[];
   debug: {
     model: string;
     imageSentToAI: boolean;
@@ -32,7 +34,7 @@ export type AnalyzeResponse = {
 };
 
 const VISION_PROMPT = `You are analyzing an image for Instagram content creation.
-Study the image carefully and return a JSON object with EXACTLY this structure:
+Study the image carefully and return a JSON object with EXACTLY this structure (no markdown, no code blocks):
 
 {
   "analysis": {
@@ -47,13 +49,45 @@ Study the image carefully and return a JSON object with EXACTLY this structure:
     "audience": "target Instagram demographic for this content",
     "postingAngle": "specific recommended angle or theme for the Instagram post"
   },
-  "caption": "A complete, engaging, ready-to-post Instagram caption. 2-3 authentic sentences that capture the mood and story. Add a line break then 5-7 relevant hashtags."
+  "captionOptions": [
+    {
+      "style": "professional",
+      "label": "Clean & Professional",
+      "caption": "2-3 polished sentences, brand-appropriate tone",
+      "hashtags": "#hashtag1 #hashtag2 #hashtag3 #hashtag4 #hashtag5"
+    },
+    {
+      "style": "casual",
+      "label": "Casual & Fun",
+      "caption": "Relaxed, conversational tone with personality — like talking to a friend",
+      "hashtags": "#hashtag1 #hashtag2 #hashtag3 #hashtag4 #hashtag5"
+    },
+    {
+      "style": "motivational",
+      "label": "Motivational",
+      "caption": "Inspiring, uplifting message that resonates with the audience",
+      "hashtags": "#hashtag1 #hashtag2 #hashtag3 #hashtag4 #hashtag5"
+    },
+    {
+      "style": "cta",
+      "label": "Sales / CTA",
+      "caption": "Benefit-driven with a clear, specific call to action",
+      "hashtags": "#hashtag1 #hashtag2 #hashtag3 #hashtag4 #hashtag5"
+    },
+    {
+      "style": "viral",
+      "label": "Short & Viral",
+      "caption": "Punchy and memorable — 1-2 lines max, built to stop the scroll",
+      "hashtags": "#hashtag1 #hashtag2 #hashtag3"
+    }
+  ]
 }
 
 Rules:
-- Respond with ONLY the JSON object
-- No markdown, no code blocks, no explanation
-- Make the caption specific to THIS image, not generic`;
+- Respond with ONLY the JSON object, no surrounding text
+- Make ALL captions specific to THIS image — never generic
+- Each caption style must be genuinely different in tone
+- Keep hashtags relevant to the actual image content`;
 
 export async function POST(request: Request) {
   const authError = requireApiKey(request);
@@ -85,7 +119,6 @@ export async function POST(request: Request) {
   const arrayBuffer = await file.arrayBuffer();
   const base64 = Buffer.from(arrayBuffer).toString("base64");
 
-  // Map browser MIME types to Anthropic's accepted media_type values
   const mediaTypeMap: Record<string, AcceptedMediaType> = {
     "image/jpeg": "image/jpeg",
     "image/jpg":  "image/jpeg",
@@ -96,28 +129,23 @@ export async function POST(request: Request) {
   const mediaType: AcceptedMediaType = mediaTypeMap[file.type] ?? "image/jpeg";
 
   const model = "claude-sonnet-4-5";
-
-  console.log(`[IG Analyze] Sending ${file.name} (${file.type}, ${file.size} bytes) to ${model}`);
+  console.log(`[IG Analyze] ${file.name} (${file.type}, ${file.size} bytes) → ${model}`);
 
   let rawText: string;
   try {
     const response = await anthropic.messages.create({
       model,
-      max_tokens: 1024,
+      max_tokens: 2048,
       messages: [
         {
           role: "user",
           content: [
-            {
-              type: "image",
-              source: { type: "base64", media_type: mediaType, data: base64 },
-            },
+            { type: "image", source: { type: "base64", media_type: mediaType, data: base64 } },
             { type: "text", text: VISION_PROMPT },
           ],
         },
       ],
     });
-
     const block = response.content.find(b => b.type === "text");
     rawText = block && "text" in block ? block.text : "";
   } catch (e) {
@@ -126,9 +154,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: false, error: `AI analysis failed: ${msg}` }, { status: 500 });
   }
 
-  let parsed: { analysis: ImageAnalysis; caption: string };
+  let parsed: { analysis: ImageAnalysis; captionOptions: CaptionOption[] };
   try {
-    // Strip markdown code fences if Claude wrapped the response
     const clean = rawText
       .trim()
       .replace(/^```(?:json)?\s*/i, "")
@@ -143,19 +170,24 @@ export async function POST(request: Request) {
     );
   }
 
-  if (!parsed.analysis || !parsed.caption) {
+  if (!parsed.analysis || !Array.isArray(parsed.captionOptions) || parsed.captionOptions.length === 0) {
     return NextResponse.json(
       { success: false, error: "AI response was missing required fields.", rawResponse: rawText },
       { status: 500 }
     );
   }
 
-  console.log(`[IG Analyze] Done. Category: ${parsed.analysis.category}. Caption length: ${parsed.caption.length}`);
+  // Backward-compat: caption = professional option full text
+  const firstOption = parsed.captionOptions[0];
+  const caption = [firstOption.caption, firstOption.hashtags].filter(Boolean).join("\n\n");
+
+  console.log(`[IG Analyze] Done. Category: ${parsed.analysis.category}. Options: ${parsed.captionOptions.length}`);
 
   return NextResponse.json({
     success: true,
     analysis: parsed.analysis,
-    caption: parsed.caption,
+    caption,
+    captionOptions: parsed.captionOptions,
     debug: {
       model,
       imageSentToAI: true,

@@ -57,3 +57,56 @@ export type PublishJob = {
   created_at: string;
   published_at: string | null;
 };
+
+// ─── ig_posts ─────────────────────────────────────────────────────────────────
+
+export type CaptionStyle = 'professional' | 'casual' | 'motivational' | 'cta' | 'viral';
+
+export type CaptionOption = {
+  style: CaptionStyle;
+  label: string;
+  caption: string;
+  hashtags: string;
+};
+
+export type IgPostStatus =
+  | 'draft'
+  | 'ready'
+  | 'publishing'
+  | 'published'
+  | 'failed'
+  | 'scheduled'
+  | 'deleted_on_instagram'
+  | 'republishing'
+  | 'republished';
+
+export const IG_POST_VALID_STATUSES: IgPostStatus[] = [
+  'draft', 'ready', 'publishing', 'published', 'failed',
+  'scheduled', 'deleted_on_instagram', 'republishing', 'republished',
+];
+
+export type IgPost = {
+  id: number;
+  title: string;
+  caption: string;
+  image_url: string | null;
+  image_storage_path: string | null;
+  image_analysis: Record<string, unknown> | null;
+  caption_options: CaptionOption[] | null;
+  normalization_meta: Record<string, unknown> | null;
+  account_id: number | null;
+  publish_job_id: number | null;
+  status: IgPostStatus;
+  error_message: string | null;
+  media_id: string | null;
+  permalink: string | null;
+  published_at: string | null;
+  // deletion-detection fields
+  original_media_id: string | null;
+  republished_from_media_id: string | null;
+  deleted_detected_at: string | null;
+  last_instagram_sync_at: string | null;
+  sync_error_message: string | null;
+  created_at: string;
+  updated_at: string;
+};
