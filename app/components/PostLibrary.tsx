@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { apiFetch } from "@/lib/api-fetch";
 import type { IgPost, IgPostStatus, ConnectedAccount, Campaign } from "@/lib/supabase";
+import DraftEditor from "@/app/components/DraftEditor";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -108,6 +109,9 @@ function PostRow({
   rescheduleError,
   accountName,
   campaignName,
+  accounts,
+  campaigns,
+  onRefresh,
 }: {
   post: IgPost;
   onPublish: (id: number) => void;
@@ -135,6 +139,9 @@ function PostRow({
   rescheduleError: string | null;
   accountName: string | undefined;
   campaignName: string | undefined;
+  accounts: ConnectedAccount[];
+  campaigns: Campaign[];
+  onRefresh: () => void;
 }) {
   const [isEditing, setIsEditing] = useState(false);
   const [editCaption, setEditCaption] = useState(post.caption);
@@ -155,6 +162,7 @@ function PostRow({
   }
 
   const isScheduled = post.status === "scheduled";
+  const isDraftStatus = post.status === "draft";
   const canPublish = post.status === "draft" || post.status === "ready" || post.status === "failed";
   const canRepublish = post.status === "deleted_on_instagram" || post.status === "deleted_by_dashboard";
   const canDeleteFromInstagram = (post.status === "published" || post.status === "republished") && !isScheduled;
@@ -169,6 +177,23 @@ function PostRow({
     : isDeletedState
     ? "ring-orange-500/20"
     : "ring-white/5";
+
+  // A draft being edited opens the full draft-completion editor instead of the row.
+  if (isEditing && isDraftStatus) {
+    return (
+      <div className={`rounded-3xl bg-slate-950/80 ring-1 ${rowRing}`}>
+        <div className="p-4">
+          <DraftEditor
+            post={post}
+            accounts={accounts}
+            campaigns={campaigns}
+            onClose={() => setIsEditing(false)}
+            onSaved={onRefresh}
+          />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={`rounded-3xl bg-slate-950/80 ring-1 ${rowRing} ${isArchived ? "opacity-60" : ""}`}>
@@ -1142,6 +1167,9 @@ export default function PostLibrary() {
               rescheduleError={rescheduleErrors[post.id] ?? null}
               accountName={accounts.find(a => a.id === post.account_id)?.account_name}
               campaignName={campaigns.find(c => c.id === post.campaign_id)?.name}
+              accounts={accounts}
+              campaigns={campaigns}
+              onRefresh={fetchPosts}
             />
           ))
         )}
