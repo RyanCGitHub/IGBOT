@@ -223,6 +223,10 @@ export default function CreatePost() {
   const [publishedMediaId, setPublishedMediaId] = useState<string | null>(null);
   const [publishedPermalink, setPublishedPermalink] = useState<string | null>(null);
   const [publishLogs, setPublishLogs]         = useState<LogEntry[] | null>(null);
+  // Tracks which button triggered the current action — controls which button shows a spinner
+  const [pendingAction, setPendingAction]     = useState<"draft" | "publish" | "schedule" | null>(null);
+  // Ref guard prevents double-submission before React re-renders
+  const isSubmittingRef                       = useRef(false);
 
   // Scheduling
   const [showSchedulePicker, setShowSchedulePicker] = useState(false);
@@ -262,6 +266,8 @@ export default function CreatePost() {
     setShowSchedulePicker(false);
     setScheduleInput("");
     setScheduleError(null);
+    setPendingAction(null);
+    isSubmittingRef.current = false;
 
     if (!f) { setFile(null); setLocalPreview(null); return; }
     setFile(f);
@@ -317,7 +323,9 @@ export default function CreatePost() {
   }
 
   async function handleSaveDraft() {
-    if (!file || !caption.trim()) return;
+    if (!file || !caption.trim() || isSubmittingRef.current) return;
+    isSubmittingRef.current = true;
+    setPendingAction("draft");
     setActionPhase("uploading");
     setActionError(null);
 
@@ -348,11 +356,16 @@ export default function CreatePost() {
     } catch (e) {
       setActionError(e instanceof Error ? e.message : String(e));
       setActionPhase("error");
+    } finally {
+      isSubmittingRef.current = false;
+      setPendingAction(null);
     }
   }
 
   async function handlePublishNow() {
-    if (!file || !caption.trim()) return;
+    if (!file || !caption.trim() || isSubmittingRef.current) return;
+    isSubmittingRef.current = true;
+    setPendingAction("publish");
     setActionPhase("uploading");
     setActionError(null);
 
@@ -396,13 +409,15 @@ export default function CreatePost() {
     } catch (e) {
       setActionError(e instanceof Error ? e.message : String(e));
       setActionPhase("error");
+    } finally {
+      isSubmittingRef.current = false;
+      setPendingAction(null);
     }
   }
 
   async function handleSchedule() {
-    if (!file || !caption.trim() || !scheduleInput) return;
+    if (!file || !caption.trim() || !scheduleInput || isSubmittingRef.current) return;
 
-    // Validate time is in the future
     const scheduledDate = new Date(scheduleInput);
     if (isNaN(scheduledDate.getTime())) {
       setScheduleError("Please enter a valid date and time.");
@@ -412,6 +427,8 @@ export default function CreatePost() {
       setScheduleError("Scheduled time must be in the future.");
       return;
     }
+    isSubmittingRef.current = true;
+    setPendingAction("schedule");
     setScheduleError(null);
     setActionPhase("uploading");
     setActionError(null);
@@ -446,6 +463,9 @@ export default function CreatePost() {
     } catch (e) {
       setActionError(e instanceof Error ? e.message : String(e));
       setActionPhase("error");
+    } finally {
+      isSubmittingRef.current = false;
+      setPendingAction(null);
     }
   }
 
@@ -649,16 +669,27 @@ export default function CreatePost() {
       <div className="mt-4">
         <p className="mb-2 text-sm font-medium text-slate-300">Instagram Account</p>
         {accounts.length > 0 ? (
-          <select
-            value={selectedAccountId ?? ""}
-            onChange={e => setSelectedAccountId(Number(e.target.value) || null)}
-            disabled={isWorking || isDone}
-            className="rounded-2xl bg-slate-800/80 px-4 py-2.5 text-sm text-slate-100 outline-none ring-1 ring-white/10 focus:ring-fuchsia-500/40 disabled:opacity-50"
-          >
-            {accounts.map(acc => (
-              <option key={acc.id} value={acc.id}>@{acc.account_name}</option>
-            ))}
-          </select>
+          <div className="flex flex-col gap-1.5">
+            <select
+              value={selectedAccountId ?? ""}
+              onChange={e => setSelectedAccountId(Number(e.target.value) || null)}
+              disabled={isWorking || isDone}
+              className="rounded-2xl bg-slate-800/80 px-4 py-2.5 text-sm text-slate-100 outline-none ring-1 ring-white/10 focus:ring-fuchsia-500/40 disabled:opacity-50"
+            >
+              {accounts.map(acc => (
+                <option key={acc.id} value={acc.id}>@{acc.account_name}</option>
+              ))}
+            </select>
+            {(() => {
+              const selected = accounts.find(a => a.id === selectedAccountId);
+              return selected ? (
+                <p className="flex items-center gap-1.5 text-xs text-slate-400">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                  Posting as <span className="font-semibold text-white">@{selected.account_name}</span>
+                </p>
+              ) : null;
+            })()}
+          </div>
         ) : (
           <p className="rounded-2xl bg-slate-950/60 px-4 py-2.5 text-sm text-slate-500 ring-1 ring-white/5">
             No connected account — connect one in the Instagram Connection section below.
@@ -675,10 +706,10 @@ export default function CreatePost() {
             disabled={!canSave}
             className="rounded-3xl bg-slate-700 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-600 disabled:cursor-not-allowed disabled:opacity-40"
           >
-            {actionPhase === "uploading" || actionPhase === "saving" ? (
+            {pendingAction === "draft" ? (
               <span className="flex items-center gap-2">
                 <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                {phaseLabel[actionPhase]}
+                {actionPhase === "uploading" ? "Uploading…" : "Saving draft…"}
               </span>
             ) : "Save as Draft"}
           </button>
@@ -690,10 +721,10 @@ export default function CreatePost() {
             className="rounded-3xl bg-fuchsia-500 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-fuchsia-400 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
             title={accounts.length === 0 ? "Connect an Instagram account first" : ""}
           >
-            {actionPhase === "publishing" ? (
+            {pendingAction === "publish" ? (
               <span className="flex items-center gap-2">
                 <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                Publishing…
+                {actionPhase === "uploading" ? "Uploading…" : actionPhase === "saving" ? "Saving…" : "Publishing… (up to 60s)"}
               </span>
             ) : "Publish Now"}
           </button>
@@ -705,12 +736,12 @@ export default function CreatePost() {
             className="rounded-3xl border border-slate-600 bg-slate-800 px-5 py-2.5 text-sm font-semibold text-slate-200 transition hover:border-fuchsia-500/50 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
             title={accounts.length === 0 ? "Connect an Instagram account first" : ""}
           >
-            {actionPhase === "scheduling" ? (
+            {pendingAction === "schedule" ? (
               <span className="flex items-center gap-2">
                 <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                Scheduling…
+                {actionPhase === "uploading" ? "Uploading…" : "Scheduling…"}
               </span>
-            ) : showSchedulePicker ? "Cancel Schedule" : "Schedule Post"}
+            ) : showSchedulePicker ? "Cancel" : "Schedule Post"}
           </button>
 
           {!file && <p className="text-xs text-slate-600">Select an image and enter a caption.</p>}

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { apiFetch } from "@/lib/api-fetch";
-import type { IgPost, IgPostStatus } from "@/lib/supabase";
+import type { IgPost, IgPostStatus, ConnectedAccount } from "@/lib/supabase";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -106,6 +106,7 @@ function PostRow({
   deleteInstagramError,
   syncError,
   rescheduleError,
+  accountName,
 }: {
   post: IgPost;
   onPublish: (id: number) => void;
@@ -131,6 +132,7 @@ function PostRow({
   deleteInstagramError: string | null;
   syncError: string | null;
   rescheduleError: string | null;
+  accountName: string | undefined;
 }) {
   const [isEditing, setIsEditing] = useState(false);
   const [editCaption, setEditCaption] = useState(post.caption);
@@ -223,6 +225,12 @@ function PostRow({
           {/* Meta row */}
           <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
             <span>{formatRelative(post.created_at)}</span>
+            {accountName && (
+              <span className="flex items-center gap-1">
+                <span className="h-1.5 w-1.5 rounded-full bg-slate-600" />
+                @{accountName}
+              </span>
+            )}
             {isScheduled && post.scheduled_at && (
               <span className="text-violet-400">
                 Scheduled for:{" "}
@@ -406,7 +414,7 @@ function PostRow({
                 >
                   {isPublishing
                     ? <Spinner label="Publishing…" />
-                    : post.status === "failed" ? "Retry" : "Publish"}
+                    : post.status === "failed" ? "Retry Publish" : "Publish"}
                 </button>
               ) : (
                 <span className="text-[10px] text-slate-600">No image</span>
@@ -560,6 +568,7 @@ export default function PostLibrary() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError]         = useState<string | null>(null);
   const [showArchived, setShowArchived] = useState(false);
+  const [accounts, setAccounts]   = useState<ConnectedAccount[]>([]);
 
   const [publishingId, setPublishingId]               = useState<number | null>(null);
   const [publishErrors, setPublishErrors]             = useState<Record<number, string>>({});
@@ -595,6 +604,13 @@ export default function PostLibrary() {
   }, []);
 
   useEffect(() => { fetchPosts(); }, [fetchPosts]);
+
+  useEffect(() => {
+    apiFetch("/api/meta/accounts")
+      .then(r => r.json())
+      .then(d => { if (d.success) setAccounts(d.accounts as ConnectedAccount[]); })
+      .catch(() => {});
+  }, []);
 
   // ── Publish / Republish ───────────────────────────────────────────────────
   async function handlePublish(id: number) {
@@ -910,7 +926,7 @@ export default function PostLibrary() {
         <div>
           <h2 className="text-base font-semibold text-white">Post Library</h2>
           <p className="mt-1 text-sm text-slate-400">
-            Drafts, published posts, and deletion history. Archive to hide, or delete from Instagram.
+            Drafts, scheduled posts, published posts, and deletion history.
           </p>
         </div>
         <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
@@ -1065,6 +1081,7 @@ export default function PostLibrary() {
               deleteInstagramError={deleteInstagramErrors[post.id] ?? null}
               syncError={syncErrors[post.id] ?? null}
               rescheduleError={rescheduleErrors[post.id] ?? null}
+              accountName={accounts.find(a => a.id === post.account_id)?.account_name}
             />
           ))
         )}
