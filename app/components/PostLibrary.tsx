@@ -77,6 +77,7 @@ function PostRow({
   onPublish,
   onDeleteRow,
   onDeleteInstagram,
+  onMarkManuallyDeleted,
   onArchive,
   onUnarchive,
   onSaveCaption,
@@ -84,6 +85,7 @@ function PostRow({
   isPublishing,
   isDeletingRow,
   isDeletingInstagram,
+  isMarkingManual,
   isArchiving,
   isUnarchiving,
   isSyncing,
@@ -95,6 +97,7 @@ function PostRow({
   onPublish: (id: number) => void;
   onDeleteRow: (id: number) => void;
   onDeleteInstagram: (id: number) => void;
+  onMarkManuallyDeleted: (id: number) => void;
   onArchive: (id: number) => void;
   onUnarchive: (id: number) => void;
   onSaveCaption: (id: number, caption: string) => void;
@@ -102,6 +105,7 @@ function PostRow({
   isPublishing: boolean;
   isDeletingRow: boolean;
   isDeletingInstagram: boolean;
+  isMarkingManual: boolean;
   isArchiving: boolean;
   isUnarchiving: boolean;
   isSyncing: boolean;
@@ -324,18 +328,29 @@ function PostRow({
               </button>
             )}
 
-            {/* Delete from Instagram */}
+            {/* Delete from Instagram + manual fallback */}
             {canDeleteFromInstagram && (
-              <button
-                type="button"
-                onClick={() => onDeleteInstagram(post.id)}
-                disabled={isDeletingInstagram}
-                className="rounded-2xl bg-red-900/40 px-3 py-1 text-xs text-red-300 hover:bg-red-800/60 disabled:opacity-50"
-              >
-                {isDeletingInstagram
-                  ? <Spinner label="Deleting…" />
-                  : "Delete from IG"}
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={() => onDeleteInstagram(post.id)}
+                  disabled={isDeletingInstagram}
+                  className="rounded-2xl bg-red-900/40 px-3 py-1 text-xs text-red-300 hover:bg-red-800/60 disabled:opacity-50"
+                >
+                  {isDeletingInstagram ? <Spinner label="Deleting…" /> : "Delete from IG"}
+                </button>
+                <p className="text-right text-[10px] leading-tight text-slate-600">
+                  Meta may block this.{"\n"}Delete in IG first if so.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => onMarkManuallyDeleted(post.id)}
+                  disabled={isMarkingManual}
+                  className="rounded-2xl bg-slate-800 px-3 py-1 text-xs text-orange-400 hover:bg-orange-500/20 disabled:opacity-40"
+                >
+                  {isMarkingManual ? "…" : "I deleted it manually"}
+                </button>
+              </>
             )}
 
             {/* Hide from Dashboard (archive) */}
@@ -401,6 +416,7 @@ export default function PostLibrary() {
   const [deletingRowId, setDeletingRowId]             = useState<number | null>(null);
   const [deletingInstagramId, setDeletingInstagramId] = useState<number | null>(null);
   const [deleteInstagramErrors, setDeleteInstagramErrors] = useState<Record<number, string>>({});
+  const [markManualId, setMarkManualId]               = useState<number | null>(null);
   const [archivingId, setArchivingId]                 = useState<number | null>(null);
   const [unarchivingId, setUnarchivingId]             = useState<number | null>(null);
   const [syncingId, setSyncingId]                     = useState<number | null>(null);
@@ -491,6 +507,41 @@ export default function PostLibrary() {
       }));
     } finally {
       setDeletingInstagramId(null);
+    }
+  }
+
+  // ── Mark manually deleted (no Instagram API call) ────────────────────────
+  async function handleMarkManuallyDeleted(id: number) {
+    if (
+      !confirm(
+        "Mark this post as deleted on Instagram?\n\n" +
+        "• Only use this if you already deleted it inside Instagram.\n" +
+        "• The dashboard row will be kept and Republish will become available.\n" +
+        "• No Instagram API call is made."
+      )
+    ) return;
+
+    setMarkManualId(id);
+    try {
+      const now = new Date().toISOString();
+      const res = await apiFetch(`/api/ig-posts/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          status: "deleted_on_instagram",
+          deleted_detected_at: now,
+          deleted_at: null,
+          sync_error_message: null,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        alert(data.error ?? "Failed to update post status.");
+      } else {
+        await fetchPosts();
+      }
+    } finally {
+      setMarkManualId(null);
     }
   }
 
@@ -725,6 +776,7 @@ export default function PostLibrary() {
               onPublish={handlePublish}
               onDeleteRow={handleDeleteRow}
               onDeleteInstagram={handleDeleteInstagram}
+              onMarkManuallyDeleted={handleMarkManuallyDeleted}
               onArchive={handleArchive}
               onUnarchive={handleUnarchive}
               onSaveCaption={handleSaveCaption}
@@ -732,6 +784,7 @@ export default function PostLibrary() {
               isPublishing={publishingId === post.id}
               isDeletingRow={deletingRowId === post.id}
               isDeletingInstagram={deletingInstagramId === post.id}
+              isMarkingManual={markManualId === post.id}
               isArchiving={archivingId === post.id}
               isUnarchiving={unarchivingId === post.id}
               isSyncing={syncingId === post.id}

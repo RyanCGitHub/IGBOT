@@ -115,12 +115,21 @@ export async function POST(
       });
     }
 
-    // Code 10 / 200: permission error
+    // Code 10 / 200: permission error — record it without changing post status
     if (code === 10 || code === 200) {
+      await supabaseServer
+        .from("ig_posts")
+        .update({
+          sync_error_message: `Meta blocked deletion (error ${code}): ${message}`,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", postId);
+
       return NextResponse.json(
         {
           success: false,
-          error: `Instagram does not allow deleting this media (permission denied). Error ${code}: ${message}`,
+          permissionDenied: true,
+          error: `Meta blocked deletion for this media (error ${code}). Delete the post manually inside Instagram, then click "I deleted it manually" in the dashboard.`,
         },
         { status: 403 }
       );
