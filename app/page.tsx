@@ -11,6 +11,7 @@ import PostLibrary from "@/app/components/PostLibrary";
 import Campaigns from "@/app/components/Campaigns";
 import ContentPlanner from "@/app/components/ContentPlanner";
 import ContentQueue from "@/app/components/ContentQueue";
+import SchedulingAssistant from "@/app/components/SchedulingAssistant";
 import { apiFetch } from "@/lib/api-fetch";
 
 export default function Home() {
@@ -329,6 +330,8 @@ export default function Home() {
         <CreatePost />
 
         <ContentQueue />
+
+        <SchedulingAssistant />
 
         <PostLibrary />
 
