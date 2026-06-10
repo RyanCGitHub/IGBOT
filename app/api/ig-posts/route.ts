@@ -31,6 +31,7 @@ type CreateBody = {
   caption_options?: CaptionOption[];
   normalization_meta?: Record<string, unknown>;
   account_id?: number;
+  campaign_id?: number | null;
   status?: IgPostStatus;
   // scheduling
   scheduled_at?: string;
@@ -94,6 +95,7 @@ export async function POST(request: Request) {
       caption_options: body.caption_options ?? null,
       normalization_meta: body.normalization_meta ?? null,
       account_id: body.account_id ?? null,
+      campaign_id: body.campaign_id ?? null,
       status,
       scheduled_at: body.scheduled_at ?? null,
       timezone: body.timezone ?? null,

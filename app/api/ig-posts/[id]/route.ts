@@ -41,7 +41,7 @@ export async function PATCH(
   // Only allow safe fields to be patched
   const allowed = [
     "title", "caption", "image_url", "image_storage_path", "image_analysis",
-    "caption_options", "normalization_meta", "account_id", "status",
+    "caption_options", "normalization_meta", "account_id", "campaign_id", "status",
     "error_message", "media_id", "permalink", "publish_job_id", "published_at",
     "original_media_id", "republished_from_media_id",
     "deleted_at", "deleted_detected_at", "last_instagram_sync_at", "sync_error_message",

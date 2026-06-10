@@ -28,6 +28,18 @@ export type ConnectedAccount = {
   created_at: string;
 };
 
+// ─── Campaigns ────────────────────────────────────────────────────────────────
+
+export type Campaign = {
+  id: number;
+  name: string;
+  description: string | null;
+  account_id: number | null;
+  content_style: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type PostStatus = 'draft' | 'approved' | 'scheduled' | 'posted';
 
 // Single source of truth — import this in every route that validates status.
@@ -98,6 +110,7 @@ export type IgPost = {
   caption_options: CaptionOption[] | null;
   normalization_meta: Record<string, unknown> | null;
   account_id: number | null;
+  campaign_id: number | null;
   publish_job_id: number | null;
   status: IgPostStatus;
   error_message: string | null;
