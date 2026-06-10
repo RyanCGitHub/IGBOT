@@ -17,8 +17,14 @@ function formatRelative(iso: string): string {
 }
 
 function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  return new Date(iso).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
 }
+
+// ─── Status display ───────────────────────────────────────────────────────────
 
 const STATUS_STYLES: Record<IgPostStatus, string> = {
   draft:                "text-slate-300   bg-slate-700/60      ring-slate-500/20",
@@ -28,8 +34,10 @@ const STATUS_STYLES: Record<IgPostStatus, string> = {
   failed:               "text-rose-300    bg-rose-500/10       ring-rose-400/20",
   scheduled:            "text-violet-300  bg-violet-500/10     ring-violet-400/20",
   deleted_on_instagram: "text-orange-300  bg-orange-500/10     ring-orange-400/20",
+  deleted_by_dashboard: "text-red-300     bg-red-500/10        ring-red-400/20",
   republishing:         "text-amber-300   bg-amber-500/10      ring-amber-400/20",
   republished:          "text-teal-300    bg-teal-500/10       ring-teal-400/20",
+  archived:             "text-slate-400   bg-slate-800/60      ring-slate-600/20",
 };
 
 const STATUS_LABEL: Record<IgPostStatus, string> = {
@@ -39,12 +47,14 @@ const STATUS_LABEL: Record<IgPostStatus, string> = {
   published:            "Published",
   failed:               "Failed",
   scheduled:            "Scheduled",
-  deleted_on_instagram: "Deleted on IG",
+  deleted_on_instagram: "Deleted on Instagram",
+  deleted_by_dashboard: "Deleted by Dashboard",
   republishing:         "Republishing…",
   republished:          "Republished",
+  archived:             "Archived",
 };
 
-// ─── LogEntry type ────────────────────────────────────────────────────────────
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 type LogEntry = {
   step: string;
@@ -52,8 +62,6 @@ type LogEntry = {
   detail: string;
   timestamp: string;
 };
-
-// ─── SyncAllResult type ───────────────────────────────────────────────────────
 
 type SyncAllResult = {
   checked: number;
@@ -67,24 +75,38 @@ type SyncAllResult = {
 function PostRow({
   post,
   onPublish,
-  onDelete,
+  onDeleteRow,
+  onDeleteInstagram,
+  onArchive,
+  onUnarchive,
   onSaveCaption,
   onSync,
   isPublishing,
-  isDeleting,
+  isDeletingRow,
+  isDeletingInstagram,
+  isArchiving,
+  isUnarchiving,
   isSyncing,
   publishError,
+  deleteInstagramError,
   syncError,
 }: {
   post: IgPost;
   onPublish: (id: number) => void;
-  onDelete: (id: number) => void;
+  onDeleteRow: (id: number) => void;
+  onDeleteInstagram: (id: number) => void;
+  onArchive: (id: number) => void;
+  onUnarchive: (id: number) => void;
   onSaveCaption: (id: number, caption: string) => void;
   onSync: (id: number) => void;
   isPublishing: boolean;
-  isDeleting: boolean;
+  isDeletingRow: boolean;
+  isDeletingInstagram: boolean;
+  isArchiving: boolean;
+  isUnarchiving: boolean;
   isSyncing: boolean;
   publishError: string | null;
+  deleteInstagramError: string | null;
   syncError: string | null;
 }) {
   const [isEditing, setIsEditing] = useState(false);
@@ -101,18 +123,23 @@ function PostRow({
     }
   }
 
-  const canPublish =
-    post.status === "draft" ||
-    post.status === "ready" ||
-    post.status === "failed";
-
-  const canRepublish = post.status === "deleted_on_instagram";
+  const canPublish = post.status === "draft" || post.status === "ready" || post.status === "failed";
+  const canRepublish = post.status === "deleted_on_instagram" || post.status === "deleted_by_dashboard";
+  const canDeleteFromInstagram = post.status === "published" || post.status === "republished";
   const canSync = post.status === "published" || post.status === "republished";
+  const canArchive = post.status !== "archived" && post.status !== "publishing" && post.status !== "republishing";
   const isInProgress = post.status === "publishing" || post.status === "republishing";
-  const isDeleted = post.status === "deleted_on_instagram";
+  const isDeletedState = post.status === "deleted_on_instagram" || post.status === "deleted_by_dashboard";
+  const isArchived = post.status === "archived";
+
+  const rowRing = isArchived
+    ? "ring-slate-600/20"
+    : isDeletedState
+    ? "ring-orange-500/20"
+    : "ring-white/5";
 
   return (
-    <div className={`rounded-3xl bg-slate-950/80 ring-1 ${isDeleted ? "ring-orange-500/20" : "ring-white/5"}`}>
+    <div className={`rounded-3xl bg-slate-950/80 ring-1 ${rowRing} ${isArchived ? "opacity-60" : ""}`}>
       <div className="flex items-start gap-4 p-4">
         {/* Thumbnail */}
         <div className="shrink-0">
@@ -121,7 +148,7 @@ function PostRow({
             <img
               src={post.image_url}
               alt="Post image"
-              className="h-16 w-16 rounded-xl object-cover ring-1 ring-white/10"
+              className={`h-16 w-16 rounded-xl object-cover ring-1 ring-white/10 ${isArchived ? "grayscale" : ""}`}
             />
           ) : (
             <div className="flex h-16 w-16 items-center justify-center rounded-xl bg-slate-800 ring-1 ring-white/10">
@@ -165,9 +192,10 @@ function PostRow({
             <p className="line-clamp-2 text-sm leading-6 text-slate-200">{post.caption}</p>
           )}
 
+          {/* Meta row */}
           <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
             <span>{formatRelative(post.created_at)}</span>
-            {post.permalink && (
+            {post.permalink && !isDeletedState && (
               <a
                 href={post.permalink}
                 target="_blank"
@@ -180,17 +208,30 @@ function PostRow({
             {post.media_id && (
               <span className="font-mono">media: {post.media_id}</span>
             )}
-            {isDeleted && post.deleted_detected_at && (
+            {post.status === "deleted_on_instagram" && post.deleted_detected_at && (
               <span className="text-orange-400">
-                Deleted detected: {formatDate(post.deleted_detected_at)}
+                Detected deleted: {formatDate(post.deleted_detected_at)}
               </span>
             )}
-            {post.last_instagram_sync_at && !isDeleted && (
+            {post.status === "deleted_by_dashboard" && post.deleted_at && (
+              <span className="text-red-400">
+                Deleted: {formatDate(post.deleted_at)}
+              </span>
+            )}
+            {isArchived && post.archived_at && (
+              <span>Archived: {formatDate(post.archived_at)}</span>
+            )}
+            {canSync && post.last_instagram_sync_at && (
               <span>Synced {formatRelative(post.last_instagram_sync_at)}</span>
+            )}
+            {post.republished_from_media_id && (
+              <span className="text-teal-500">
+                Republished · original: {post.original_media_id ?? "unknown"}
+              </span>
             )}
           </div>
 
-          {/* Error messages */}
+          {/* Error / warning messages — suppress stored errors on archived posts */}
           {publishError && (
             <p className="mt-1.5 rounded-xl border border-rose-500/30 bg-rose-500/10 px-2 py-1 text-xs text-rose-300">
               {publishError}
@@ -201,33 +242,37 @@ function PostRow({
               {post.error_message}
             </p>
           )}
+          {deleteInstagramError && (
+            <p className="mt-1.5 rounded-xl border border-red-500/30 bg-red-500/10 px-2 py-1 text-xs text-red-300">
+              {deleteInstagramError}
+            </p>
+          )}
           {syncError && (
             <p className="mt-1.5 rounded-xl border border-orange-500/30 bg-orange-500/10 px-2 py-1 text-xs text-orange-300">
               Sync: {syncError}
             </p>
           )}
-          {post.sync_error_message && !syncError && (
-            <p className="mt-1.5 rounded-xl border border-orange-500/30 bg-orange-500/10 px-2 py-1 text-xs text-orange-300">
+          {post.sync_error_message && !syncError && !isArchived && (
+            <p className="mt-1.5 rounded-xl border border-orange-500/30 bg-orange-500/10 px-2 py-1 text-xs text-orange-300/70">
               Last sync error: {post.sync_error_message}
             </p>
           )}
-
-          {/* Republish history */}
-          {post.republished_from_media_id && (
-            <p className="mt-1.5 text-xs text-teal-500">
-              Republished · original: {post.original_media_id ?? "unknown"}
+          {post.sync_error_message && !syncError && isArchived && (
+            <p className="mt-1.5 text-xs text-slate-600">
+              Previous error: {post.sync_error_message}
             </p>
           )}
         </div>
 
-        {/* Status + actions */}
+        {/* Status badge + action buttons */}
         <div className="flex shrink-0 flex-col items-end gap-2">
           <span className={`rounded-full px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.15em] ring-1 ${STATUS_STYLES[post.status]}`}>
             {STATUS_LABEL[post.status]}
           </span>
 
           <div className="flex flex-col gap-1.5">
-            {!isEditing && !isInProgress && post.status !== "published" && post.status !== "republished" && (
+            {/* Edit caption */}
+            {!isEditing && !isInProgress && !isArchived && post.status !== "published" && post.status !== "republished" && (
               <button
                 type="button"
                 onClick={() => setIsEditing(true)}
@@ -237,26 +282,25 @@ function PostRow({
               </button>
             )}
 
-            {/* Publish / Retry */}
-            {canPublish && !post.image_url ? (
-              <span className="text-[10px] text-slate-600">No image</span>
-            ) : canPublish ? (
-              <button
-                type="button"
-                onClick={() => onPublish(post.id)}
-                disabled={isPublishing}
-                className="rounded-2xl bg-fuchsia-500 px-3 py-1 text-xs font-semibold text-white hover:bg-fuchsia-400 disabled:opacity-50"
-              >
-                {isPublishing ? (
-                  <span className="flex items-center gap-1">
-                    <span className="inline-block h-2.5 w-2.5 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                    Publishing…
-                  </span>
-                ) : post.status === "failed" ? "Retry" : "Publish"}
-              </button>
-            ) : null}
+            {/* Publish */}
+            {canPublish && (
+              post.image_url ? (
+                <button
+                  type="button"
+                  onClick={() => onPublish(post.id)}
+                  disabled={isPublishing}
+                  className="rounded-2xl bg-fuchsia-500 px-3 py-1 text-xs font-semibold text-white hover:bg-fuchsia-400 disabled:opacity-50"
+                >
+                  {isPublishing
+                    ? <Spinner label="Publishing…" />
+                    : post.status === "failed" ? "Retry" : "Publish"}
+                </button>
+              ) : (
+                <span className="text-[10px] text-slate-600">No image</span>
+              )
+            )}
 
-            {/* Republish (deleted_on_instagram) */}
+            {/* Republish */}
             {canRepublish && (
               <button
                 type="button"
@@ -264,12 +308,7 @@ function PostRow({
                 disabled={isPublishing}
                 className="rounded-2xl bg-orange-500 px-3 py-1 text-xs font-semibold text-white hover:bg-orange-400 disabled:opacity-50"
               >
-                {isPublishing ? (
-                  <span className="flex items-center gap-1">
-                    <span className="inline-block h-2.5 w-2.5 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                    Republishing…
-                  </span>
-                ) : "Republish"}
+                {isPublishing ? <Spinner label="Republishing…" /> : "Republish"}
               </button>
             )}
 
@@ -281,22 +320,57 @@ function PostRow({
                 disabled={isSyncing}
                 className="rounded-2xl bg-slate-700 px-3 py-1 text-xs text-slate-300 hover:bg-slate-600 disabled:opacity-50"
               >
-                {isSyncing ? (
-                  <span className="flex items-center gap-1">
-                    <span className="inline-block h-2.5 w-2.5 animate-spin rounded-full border-2 border-slate-300 border-t-transparent" />
-                    Checking…
-                  </span>
-                ) : "Check Status"}
+                {isSyncing ? <Spinner label="Checking…" /> : "Check Status"}
               </button>
             )}
 
+            {/* Delete from Instagram */}
+            {canDeleteFromInstagram && (
+              <button
+                type="button"
+                onClick={() => onDeleteInstagram(post.id)}
+                disabled={isDeletingInstagram}
+                className="rounded-2xl bg-red-900/40 px-3 py-1 text-xs text-red-300 hover:bg-red-800/60 disabled:opacity-50"
+              >
+                {isDeletingInstagram
+                  ? <Spinner label="Deleting…" />
+                  : "Delete from IG"}
+              </button>
+            )}
+
+            {/* Hide from Dashboard (archive) */}
+            {canArchive && (
+              <button
+                type="button"
+                onClick={() => onArchive(post.id)}
+                disabled={isArchiving}
+                title="Hides this post from the dashboard. Does not affect Instagram."
+                className="rounded-2xl bg-slate-800 px-3 py-1 text-xs text-slate-400 hover:bg-slate-700 disabled:opacity-40"
+              >
+                {isArchiving ? "…" : "Hide from Dashboard"}
+              </button>
+            )}
+
+            {/* Restore to Library (unarchive) */}
+            {isArchived && (
+              <button
+                type="button"
+                onClick={() => onUnarchive(post.id)}
+                disabled={isUnarchiving}
+                className="rounded-2xl bg-slate-700 px-3 py-1 text-xs text-slate-200 hover:bg-slate-600 disabled:opacity-40"
+              >
+                {isUnarchiving ? "…" : "Restore to Library"}
+              </button>
+            )}
+
+            {/* Hard-delete row (always available, for permanent cleanup) */}
             <button
               type="button"
-              onClick={() => onDelete(post.id)}
-              disabled={isDeleting || isPublishing || isInProgress}
-              className="rounded-2xl bg-slate-800 px-3 py-1 text-xs text-rose-400 hover:bg-rose-500/20 disabled:opacity-40"
+              onClick={() => onDeleteRow(post.id)}
+              disabled={isDeletingRow || isPublishing || isInProgress}
+              className="rounded-2xl bg-slate-800 px-3 py-1 text-xs text-rose-500/70 hover:bg-rose-500/20 disabled:opacity-40"
             >
-              {isDeleting ? "…" : "Delete"}
+              {isDeletingRow ? "…" : "Remove"}
             </button>
           </div>
         </div>
@@ -305,20 +379,34 @@ function PostRow({
   );
 }
 
+function Spinner({ label }: { label: string }) {
+  return (
+    <span className="flex items-center gap-1">
+      <span className="inline-block h-2.5 w-2.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+      {label}
+    </span>
+  );
+}
+
 // ─── PostLibrary ──────────────────────────────────────────────────────────────
 
 export default function PostLibrary() {
-  const [posts, setPosts]     = useState<IgPost[]>([]);
+  const [posts, setPosts]         = useState<IgPost[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError]     = useState<string | null>(null);
+  const [error, setError]         = useState<string | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
 
-  const [publishingId, setPublishingId]   = useState<number | null>(null);
-  const [publishErrors, setPublishErrors] = useState<Record<number, string>>({});
-  const [deletingId, setDeletingId]       = useState<number | null>(null);
-  const [syncingId, setSyncingId]         = useState<number | null>(null);
-  const [syncErrors, setSyncErrors]       = useState<Record<number, string>>({});
-  const [isSyncingAll, setIsSyncingAll]   = useState(false);
-  const [syncAllResult, setSyncAllResult] = useState<SyncAllResult | null>(null);
+  const [publishingId, setPublishingId]               = useState<number | null>(null);
+  const [publishErrors, setPublishErrors]             = useState<Record<number, string>>({});
+  const [deletingRowId, setDeletingRowId]             = useState<number | null>(null);
+  const [deletingInstagramId, setDeletingInstagramId] = useState<number | null>(null);
+  const [deleteInstagramErrors, setDeleteInstagramErrors] = useState<Record<number, string>>({});
+  const [archivingId, setArchivingId]                 = useState<number | null>(null);
+  const [unarchivingId, setUnarchivingId]             = useState<number | null>(null);
+  const [syncingId, setSyncingId]                     = useState<number | null>(null);
+  const [syncErrors, setSyncErrors]                   = useState<Record<number, string>>({});
+  const [isSyncingAll, setIsSyncingAll]               = useState(false);
+  const [syncAllResult, setSyncAllResult]             = useState<SyncAllResult | null>(null);
 
   const fetchPosts = useCallback(async () => {
     setIsLoading(true);
@@ -337,10 +425,10 @@ export default function PostLibrary() {
 
   useEffect(() => { fetchPosts(); }, [fetchPosts]);
 
+  // ── Publish / Republish ───────────────────────────────────────────────────
   async function handlePublish(id: number) {
     setPublishingId(id);
     setPublishErrors(prev => { const n = { ...prev }; delete n[id]; return n; });
-
     try {
       const res = await apiFetch(`/api/ig-posts/${id}/publish`, { method: "POST" });
       const data = await res.json() as { success: boolean; error?: string; logs?: LogEntry[] };
@@ -356,9 +444,10 @@ export default function PostLibrary() {
     }
   }
 
-  async function handleDelete(id: number) {
-    if (!confirm("Delete this post? This cannot be undone.")) return;
-    setDeletingId(id);
+  // ── Delete row (hard delete from DB) ─────────────────────────────────────
+  async function handleDeleteRow(id: number) {
+    if (!confirm("Permanently remove this post from the dashboard? This cannot be undone.")) return;
+    setDeletingRowId(id);
     try {
       const res = await apiFetch(`/api/ig-posts/${id}`, { method: "DELETE" });
       const data = await res.json();
@@ -368,10 +457,98 @@ export default function PostLibrary() {
         setPosts(prev => prev.filter(p => p.id !== id));
       }
     } finally {
-      setDeletingId(null);
+      setDeletingRowId(null);
     }
   }
 
+  // ── Delete from Instagram ─────────────────────────────────────────────────
+  async function handleDeleteInstagram(id: number) {
+    const post = posts.find(p => p.id === id);
+    const label = post?.media_id ? `media ID ${post.media_id}` : "this post";
+    if (
+      !confirm(
+        `Delete ${label} from Instagram?\n\n` +
+        "• The Instagram post will be permanently deleted.\n" +
+        "• Your dashboard row will be kept so you can republish later.\n\n" +
+        "This cannot be undone."
+      )
+    ) return;
+
+    setDeletingInstagramId(id);
+    setDeleteInstagramErrors(prev => { const n = { ...prev }; delete n[id]; return n; });
+    try {
+      const res = await apiFetch(`/api/ig-posts/${id}/delete-instagram`, { method: "POST" });
+      const data = await res.json() as { success: boolean; error?: string };
+      if (!res.ok || !data.success) {
+        setDeleteInstagramErrors(prev => ({ ...prev, [id]: data.error ?? "Delete failed." }));
+      } else {
+        await fetchPosts();
+      }
+    } catch (e) {
+      setDeleteInstagramErrors(prev => ({
+        ...prev,
+        [id]: e instanceof Error ? e.message : "Delete from Instagram failed.",
+      }));
+    } finally {
+      setDeletingInstagramId(null);
+    }
+  }
+
+  // ── Archive (hide from dashboard — no Instagram API call) ────────────────
+  async function handleArchive(id: number) {
+    const post = posts.find(p => p.id === id);
+    if (!post) return;
+    setArchivingId(id);
+    try {
+      const now = new Date().toISOString();
+      const res = await apiFetch(`/api/ig-posts/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          status: "archived",
+          previous_status: post.status,
+          archived_at: now,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        alert(data.error ?? "Archive failed.");
+      } else {
+        await fetchPosts();
+      }
+    } finally {
+      setArchivingId(null);
+    }
+  }
+
+  // ── Unarchive (restore — no Instagram API call) ───────────────────────────
+  async function handleUnarchive(id: number) {
+    const post = posts.find(p => p.id === id);
+    if (!post) return;
+    setUnarchivingId(id);
+    try {
+      const restoredStatus = post.previous_status ?? (post.media_id ? "published" : "draft");
+      const res = await apiFetch(`/api/ig-posts/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          status: restoredStatus,
+          previous_status: null,
+          archived_at: null,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        alert(data.error ?? "Restore failed.");
+      } else {
+        await fetchPosts();
+      }
+    } finally {
+      setUnarchivingId(null);
+    }
+  }
+
+  // ── Save caption ──────────────────────────────────────────────────────────
   async function handleSaveCaption(id: number, caption: string) {
     const res = await apiFetch(`/api/ig-posts/${id}`, {
       method: "PATCH",
@@ -383,18 +560,16 @@ export default function PostLibrary() {
     setPosts(prev => prev.map(p => p.id === id ? { ...p, caption } : p));
   }
 
+  // ── Single sync ───────────────────────────────────────────────────────────
   async function handleSync(id: number) {
     setSyncingId(id);
     setSyncErrors(prev => { const n = { ...prev }; delete n[id]; return n; });
-
     try {
       const res = await apiFetch(`/api/ig-posts/${id}/sync`, { method: "POST" });
       const data = await res.json() as { success: boolean; result?: string; error?: string };
-
       if (!res.ok || !data.success) {
         setSyncErrors(prev => ({ ...prev, [id]: data.error ?? "Sync failed." }));
       } else {
-        // Refresh the post to reflect any status change
         await fetchPosts();
       }
     } catch (e) {
@@ -404,14 +579,13 @@ export default function PostLibrary() {
     }
   }
 
+  // ── Bulk sync ─────────────────────────────────────────────────────────────
   async function handleSyncAll() {
     setIsSyncingAll(true);
     setSyncAllResult(null);
-
     try {
       const res = await apiFetch("/api/ig-posts/sync-published", { method: "POST" });
       const data = await res.json() as { success: boolean; error?: string } & Partial<SyncAllResult>;
-
       if (!res.ok || !data.success) {
         alert(data.error ?? "Bulk sync failed.");
       } else {
@@ -428,17 +602,23 @@ export default function PostLibrary() {
     }
   }
 
-  const counts = {
-    total:       posts.length,
-    draft:       posts.filter(p => p.status === "draft").length,
-    published:   posts.filter(p => p.status === "published" || p.status === "republished").length,
-    failed:      posts.filter(p => p.status === "failed").length,
-    deleted:     posts.filter(p => p.status === "deleted_on_instagram").length,
-  };
+  // ── Derived state ─────────────────────────────────────────────────────────
+  const visiblePosts = showArchived
+    ? posts
+    : posts.filter(p => p.status !== "archived");
 
+  const archivedCount = posts.filter(p => p.status === "archived").length;
   const publishedOrRepublished = posts.filter(
     p => p.status === "published" || p.status === "republished"
   ).length;
+
+  const counts = {
+    total:     visiblePosts.length,
+    draft:     visiblePosts.filter(p => p.status === "draft").length,
+    published: visiblePosts.filter(p => p.status === "published" || p.status === "republished").length,
+    deleted:   visiblePosts.filter(p => p.status === "deleted_on_instagram" || p.status === "deleted_by_dashboard").length,
+    failed:    visiblePosts.filter(p => p.status === "failed").length,
+  };
 
   return (
     <section className="rounded-3xl border border-white/10 bg-slate-900/70 p-6 shadow-xl shadow-slate-950/25">
@@ -447,13 +627,26 @@ export default function PostLibrary() {
         <div>
           <h2 className="text-base font-semibold text-white">Post Library</h2>
           <p className="mt-1 text-sm text-slate-400">
-            All posts — drafts, ready, and published. Edit captions and publish from here.
+            Drafts, published posts, and deletion history. Archive to hide, or delete from Instagram.
           </p>
         </div>
-        <div className="flex shrink-0 flex-wrap items-center gap-2">
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
           <span className="rounded-full bg-slate-800 px-3 py-1 text-xs uppercase tracking-[0.25em] text-slate-300">
             {isLoading ? "…" : `${counts.total} posts`}
           </span>
+          {archivedCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowArchived(v => !v)}
+              className={`rounded-3xl px-3 py-1.5 text-xs font-semibold transition ${
+                showArchived
+                  ? "bg-slate-600 text-slate-100 hover:bg-slate-500"
+                  : "bg-slate-800 text-slate-400 hover:bg-slate-700"
+              }`}
+            >
+              {showArchived ? `Hide hidden posts (${archivedCount})` : `Show hidden posts (${archivedCount})`}
+            </button>
+          )}
           {publishedOrRepublished > 0 && (
             <button
               type="button"
@@ -461,12 +654,7 @@ export default function PostLibrary() {
               disabled={isSyncingAll || isLoading}
               className="rounded-3xl bg-teal-700/60 px-3 py-1.5 text-xs font-semibold text-teal-200 transition hover:bg-teal-600/60 disabled:opacity-50"
             >
-              {isSyncingAll ? (
-                <span className="flex items-center gap-1">
-                  <span className="inline-block h-2.5 w-2.5 animate-spin rounded-full border-2 border-teal-200 border-t-transparent" />
-                  Syncing…
-                </span>
-              ) : "Sync Published Posts"}
+              {isSyncingAll ? <Spinner label="Syncing…" /> : "Sync Published Posts"}
             </button>
           )}
           <button
@@ -489,8 +677,8 @@ export default function PostLibrary() {
         </div>
       )}
 
-      {/* Stats row */}
-      {!isLoading && posts.length > 0 && (
+      {/* Stats pills */}
+      {!isLoading && visiblePosts.length > 0 && (
         <div className="mt-4 flex flex-wrap gap-2">
           {counts.draft > 0 && (
             <span className="rounded-full bg-slate-700/60 px-3 py-1 text-xs text-slate-300 ring-1 ring-slate-500/20">
@@ -504,7 +692,7 @@ export default function PostLibrary() {
           )}
           {counts.deleted > 0 && (
             <span className="rounded-full bg-orange-500/10 px-3 py-1 text-xs text-orange-300 ring-1 ring-orange-400/20">
-              {counts.deleted} deleted on IG
+              {counts.deleted} deleted
             </span>
           )}
           {counts.failed > 0 && (
@@ -515,7 +703,7 @@ export default function PostLibrary() {
         </div>
       )}
 
-      {/* List */}
+      {/* Post list */}
       <div className="mt-6 space-y-3">
         {isLoading ? (
           [1, 2, 3].map(n => (
@@ -525,23 +713,30 @@ export default function PostLibrary() {
           <div className="rounded-3xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-200">
             {error}
           </div>
-        ) : posts.length === 0 ? (
+        ) : visiblePosts.length === 0 ? (
           <p className="rounded-3xl bg-slate-950/80 px-5 py-6 text-sm text-slate-400 ring-1 ring-white/5">
             No posts yet. Use Create Post above to add your first post.
           </p>
         ) : (
-          posts.map(post => (
+          visiblePosts.map(post => (
             <PostRow
               key={post.id}
               post={post}
               onPublish={handlePublish}
-              onDelete={handleDelete}
+              onDeleteRow={handleDeleteRow}
+              onDeleteInstagram={handleDeleteInstagram}
+              onArchive={handleArchive}
+              onUnarchive={handleUnarchive}
               onSaveCaption={handleSaveCaption}
               onSync={handleSync}
               isPublishing={publishingId === post.id}
-              isDeleting={deletingId === post.id}
+              isDeletingRow={deletingRowId === post.id}
+              isDeletingInstagram={deletingInstagramId === post.id}
+              isArchiving={archivingId === post.id}
+              isUnarchiving={unarchivingId === post.id}
               isSyncing={syncingId === post.id}
               publishError={publishErrors[post.id] ?? null}
+              deleteInstagramError={deleteInstagramErrors[post.id] ?? null}
               syncError={syncErrors[post.id] ?? null}
             />
           ))

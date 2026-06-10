@@ -77,12 +77,15 @@ export type IgPostStatus =
   | 'failed'
   | 'scheduled'
   | 'deleted_on_instagram'
+  | 'deleted_by_dashboard'
   | 'republishing'
-  | 'republished';
+  | 'republished'
+  | 'archived';
 
 export const IG_POST_VALID_STATUSES: IgPostStatus[] = [
   'draft', 'ready', 'publishing', 'published', 'failed',
-  'scheduled', 'deleted_on_instagram', 'republishing', 'republished',
+  'scheduled', 'deleted_on_instagram', 'deleted_by_dashboard',
+  'republishing', 'republished', 'archived',
 ];
 
 export type IgPost = {
@@ -104,9 +107,13 @@ export type IgPost = {
   // deletion-detection fields
   original_media_id: string | null;
   republished_from_media_id: string | null;
+  deleted_at: string | null;
   deleted_detected_at: string | null;
   last_instagram_sync_at: string | null;
   sync_error_message: string | null;
+  // archive
+  previous_status: IgPostStatus | null;
+  archived_at: string | null;
   created_at: string;
   updated_at: string;
 };

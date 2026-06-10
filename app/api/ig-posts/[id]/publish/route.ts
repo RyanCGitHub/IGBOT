@@ -14,7 +14,7 @@ type Params = { id: string };
 
 // Statuses that allow publishing/republishing
 const PUBLISHABLE_STATUSES = new Set([
-  "draft", "ready", "failed", "deleted_on_instagram",
+  "draft", "ready", "failed", "deleted_on_instagram", "deleted_by_dashboard",
 ]);
 
 export async function POST(
@@ -70,7 +70,9 @@ export async function POST(
     );
   }
 
-  const isRepublish = post.status === "deleted_on_instagram";
+  const isRepublish =
+    post.status === "deleted_on_instagram" ||
+    post.status === "deleted_by_dashboard";
 
   // ── Fetch connected account ───────────────────────────────────────────────
   const resolvedAccountId = accountIdOverride ?? post.account_id;
@@ -186,6 +188,7 @@ export async function POST(
     error_message: null,
     sync_error_message: null,
     deleted_detected_at: null,
+    deleted_at: null,
   };
 
   if (isRepublish) {
