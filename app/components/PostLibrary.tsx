@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { apiFetch } from "@/lib/api-fetch";
-import type { IgPost, IgPostStatus, ConnectedAccount } from "@/lib/supabase";
+import type { IgPost, IgPostStatus, ConnectedAccount, Campaign } from "@/lib/supabase";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -107,6 +107,7 @@ function PostRow({
   syncError,
   rescheduleError,
   accountName,
+  campaignName,
 }: {
   post: IgPost;
   onPublish: (id: number) => void;
@@ -133,6 +134,7 @@ function PostRow({
   syncError: string | null;
   rescheduleError: string | null;
   accountName: string | undefined;
+  campaignName: string | undefined;
 }) {
   const [isEditing, setIsEditing] = useState(false);
   const [editCaption, setEditCaption] = useState(post.caption);
@@ -229,6 +231,11 @@ function PostRow({
               <span className="flex items-center gap-1">
                 <span className="h-1.5 w-1.5 rounded-full bg-slate-600" />
                 @{accountName}
+              </span>
+            )}
+            {campaignName && (
+              <span className="rounded-full bg-fuchsia-500/10 px-2 py-0.5 text-fuchsia-300 ring-1 ring-fuchsia-400/20">
+                {campaignName}
               </span>
             )}
             {isScheduled && post.scheduled_at && (
@@ -570,6 +577,8 @@ export default function PostLibrary() {
   const [showArchived, setShowArchived] = useState(false);
   const [accounts, setAccounts]   = useState<ConnectedAccount[]>([]);
   const [accountFilter, setAccountFilter] = useState<number | "all" | "none">("all");
+  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [campaignFilter, setCampaignFilter] = useState<number | "all" | "none">("all");
 
   const [publishingId, setPublishingId]               = useState<number | null>(null);
   const [publishErrors, setPublishErrors]             = useState<Record<number, string>>({});
@@ -610,6 +619,13 @@ export default function PostLibrary() {
     apiFetch("/api/meta/accounts")
       .then(r => r.json())
       .then(d => { if (d.success) setAccounts(d.accounts as ConnectedAccount[]); })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    apiFetch("/api/campaigns")
+      .then(r => r.json())
+      .then(d => { if (d.success) setCampaigns(d.campaigns as Campaign[]); })
       .catch(() => {});
   }, []);
 
@@ -906,9 +922,12 @@ export default function PostLibrary() {
     // Archive visibility
     if (!showArchived && p.status === "archived") return false;
     // Account filter
-    if (accountFilter === "all") return true;
-    if (accountFilter === "none") return p.account_id == null;
-    return p.account_id === accountFilter;
+    if (accountFilter === "none" && p.account_id != null) return false;
+    if (typeof accountFilter === "number" && p.account_id !== accountFilter) return false;
+    // Campaign filter
+    if (campaignFilter === "none" && p.campaign_id != null) return false;
+    if (typeof campaignFilter === "number" && p.campaign_id !== campaignFilter) return false;
+    return true;
   });
 
   const archivedCount = posts.filter(p => p.status === "archived").length;
@@ -954,6 +973,23 @@ export default function PostLibrary() {
                 <option key={a.id} value={a.id}>@{a.account_name}</option>
               ))}
               <option value="none">No account assigned</option>
+            </select>
+          )}
+          {campaigns.length > 0 && (
+            <select
+              value={String(campaignFilter)}
+              onChange={e => {
+                const v = e.target.value;
+                setCampaignFilter(v === "all" || v === "none" ? v : Number(v));
+              }}
+              title="Filter posts by campaign"
+              className="rounded-3xl bg-slate-800 px-3 py-1.5 text-xs font-semibold text-slate-200 outline-none ring-1 ring-white/10 transition hover:bg-slate-700 focus:ring-fuchsia-500/40"
+            >
+              <option value="all">All campaigns</option>
+              {campaigns.map(c => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+              <option value="none">No campaign assigned</option>
             </select>
           )}
           {archivedCount > 0 && (
@@ -1105,6 +1141,7 @@ export default function PostLibrary() {
               syncError={syncErrors[post.id] ?? null}
               rescheduleError={rescheduleErrors[post.id] ?? null}
               accountName={accounts.find(a => a.id === post.account_id)?.account_name}
+              campaignName={campaigns.find(c => c.id === post.campaign_id)?.name}
             />
           ))
         )}

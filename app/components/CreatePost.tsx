@@ -3,7 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { apiFetch } from "@/lib/api-fetch";
 import type { ImageAnalysis } from "@/app/api/instagram/analyze/route";
-import type { CaptionOption, ConnectedAccount, IgPost } from "@/lib/supabase";
+import type { CaptionOption, ConnectedAccount, IgPost, Campaign } from "@/lib/supabase";
 import type { NormalizationMeta } from "@/lib/image-normalize";
 
 // ─── Local types ──────────────────────────────────────────────────────────────
@@ -216,6 +216,10 @@ export default function CreatePost() {
   const [accounts, setAccounts]           = useState<ConnectedAccount[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
 
+  // Campaigns (optional — a post may belong to no campaign)
+  const [campaigns, setCampaigns]         = useState<Campaign[]>([]);
+  const [selectedCampaignId, setSelectedCampaignId] = useState<number | null>(null);
+
   // Save / publish
   const [actionPhase, setActionPhase]         = useState<ActionPhase>("idle");
   const [actionError, setActionError]         = useState<string | null>(null);
@@ -245,6 +249,14 @@ export default function CreatePost() {
           if (list.length > 0) setSelectedAccountId(list[0].id);
         }
       })
+      .catch(() => {});
+  }, []);
+
+  // Load campaigns on mount (optional assignment)
+  useEffect(() => {
+    apiFetch("/api/campaigns")
+      .then(r => r.json())
+      .then(d => { if (d.success) setCampaigns(d.campaigns as Campaign[]); })
       .catch(() => {});
   }, []);
 
@@ -345,6 +357,7 @@ export default function CreatePost() {
           caption_options: captionOptions ?? undefined,
           normalization_meta: uploaded.normalization as unknown as Record<string, unknown>,
           account_id: selectedAccountId ?? undefined,
+          campaign_id: selectedCampaignId,
           status: "draft",
         }),
       });
@@ -386,6 +399,7 @@ export default function CreatePost() {
           caption_options: captionOptions ?? undefined,
           normalization_meta: uploaded.normalization as unknown as Record<string, unknown>,
           account_id: selectedAccountId,
+          campaign_id: selectedCampaignId,
           status: "ready",
         }),
       });
@@ -451,6 +465,7 @@ export default function CreatePost() {
           caption_options: captionOptions ?? undefined,
           normalization_meta: uploaded.normalization as unknown as Record<string, unknown>,
           account_id: selectedAccountId,
+          campaign_id: selectedCampaignId,
           status: "scheduled",
           scheduled_at: scheduledDate.toISOString(),
           timezone: scheduleTz,
@@ -700,6 +715,33 @@ export default function CreatePost() {
             No connected account — connect one in the Instagram Connection section below.
           </p>
         )}
+      </div>
+
+      {/* ── Campaign selector (optional) ─────────────────────────────────────── */}
+      <div className="mt-4">
+        <p className="mb-2 text-sm font-medium text-slate-300">
+          Campaign <span className="text-slate-500">(optional)</span>
+        </p>
+        {campaigns.length > 0 ? (
+          <select
+            value={selectedCampaignId ?? ""}
+            onChange={e => setSelectedCampaignId(e.target.value ? Number(e.target.value) : null)}
+            disabled={isWorking || isDone}
+            className="rounded-2xl bg-slate-800/80 px-4 py-2.5 text-sm text-slate-100 outline-none ring-1 ring-white/10 focus:ring-fuchsia-500/40 disabled:opacity-50"
+          >
+            <option value="">No campaign</option>
+            {campaigns.map(c => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+        ) : (
+          <p className="rounded-2xl bg-slate-950/60 px-4 py-2.5 text-sm text-slate-500 ring-1 ring-white/5">
+            No campaigns yet — create one in the Campaigns section. Posts don&apos;t require a campaign.
+          </p>
+        )}
+        <p className="mt-1.5 text-xs text-slate-600">
+          Campaigns only organize posts — they never change which account publishes.
+        </p>
       </div>
 
       {/* ── STEP 5: Action buttons ───────────────────────────────────────────── */}
