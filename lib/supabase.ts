@@ -65,6 +65,14 @@ export type GeneratedIdea = {
   hashtags: string;
 };
 
+// An ephemeral AI scheduling suggestion. Never persisted — consumed by assigning
+// the recommended time to an existing draft via the schedule route.
+export type ScheduleSuggestion = {
+  recommended_at: string; // ISO 8601 UTC
+  reason: string;
+  theme: string;
+};
+
 export type PostStatus = 'draft' | 'approved' | 'scheduled' | 'posted';
 
 // Single source of truth — import this in every route that validates status.
