@@ -12,6 +12,7 @@ import Campaigns from "@/app/components/Campaigns";
 import ContentPlanner from "@/app/components/ContentPlanner";
 import ContentQueue from "@/app/components/ContentQueue";
 import SchedulingAssistant from "@/app/components/SchedulingAssistant";
+import Analytics from "@/app/components/Analytics";
 import { apiFetch } from "@/lib/api-fetch";
 
 export default function Home() {
@@ -334,6 +335,8 @@ export default function Home() {
         <SchedulingAssistant />
 
         <PostLibrary />
+
+        <Analytics />
 
         <section className="rounded-3xl border border-white/5 bg-slate-900/40 p-6">
           <details>
