@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-export async function GET() {
+export async function GET(request: Request) {
   const appId = process.env.META_APP_ID;
   const redirectUri = process.env.NEXT_PUBLIC_META_REDIRECT_URI;
 
@@ -10,6 +10,14 @@ export async function GET() {
       { status: 500 }
     );
   }
+
+  // When adding/reconnecting an account, force Meta to re-show the consent +
+  // Page-selection screen. Without this, Meta silently reuses the prior grant
+  // and never lets you pick an additional Page/IG account.
+  const { searchParams } = new URL(request.url);
+  const forceReauth =
+    searchParams.get("force_reauth") === "true" ||
+    searchParams.get("auth_type") === "rerequest";
 
   // One-time CSRF token stored in a short-lived httpOnly cookie
   const state = crypto.randomUUID();
@@ -21,6 +29,16 @@ export async function GET() {
     response_type: "code",
     state,
   });
+
+  // auth_type=rerequest tells Meta to prompt again rather than skip straight
+  // through, surfacing the "which Pages do you want to use" selector.
+  if (forceReauth) {
+    params.set("auth_type", "rerequest");
+  }
+
+  console.log(
+    `[meta/login] Starting OAuth${forceReauth ? " (force re-auth — add/reconnect account)" : ""}`
+  );
 
   const oauthUrl = `https://www.facebook.com/v21.0/dialog/oauth?${params}`;
   const response = NextResponse.redirect(oauthUrl);

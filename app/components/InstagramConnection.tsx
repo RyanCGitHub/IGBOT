@@ -135,7 +135,7 @@ export default function InstagramConnection() {
               </p>
             </div>
             <a
-              href="/api/meta/login"
+              href="/api/meta/login?force_reauth=true"
               className="inline-flex shrink-0 items-center rounded-3xl bg-fuchsia-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-fuchsia-400"
             >
               Connect Instagram
@@ -172,7 +172,7 @@ export default function InstagramConnection() {
                       Connected
                     </span>
                     <a
-                      href="/api/meta/login"
+                      href="/api/meta/login?force_reauth=true"
                       className="rounded-2xl bg-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-200 transition hover:bg-slate-600"
                     >
                       Reconnect
@@ -181,6 +181,27 @@ export default function InstagramConnection() {
                 </div>
               );
             })}
+
+            {/* Add an additional Instagram account */}
+            <div className="flex flex-col gap-3 rounded-3xl border border-dashed border-fuchsia-500/30 bg-slate-950/60 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm font-semibold text-white">
+                  Add another Instagram account
+                </p>
+                <p className="mt-1 max-w-md text-xs text-slate-400">
+                  Meta must return a Facebook Page linked to an Instagram
+                  Business or Creator account. On the next screen, select{" "}
+                  <span className="text-slate-300">all Pages</span> you want to
+                  connect — your existing accounts stay connected.
+                </p>
+              </div>
+              <a
+                href="/api/meta/login?force_reauth=true"
+                className="inline-flex shrink-0 items-center rounded-3xl bg-fuchsia-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-fuchsia-400"
+              >
+                Add Another Instagram Account
+              </a>
+            </div>
           </div>
         )}
       </div>

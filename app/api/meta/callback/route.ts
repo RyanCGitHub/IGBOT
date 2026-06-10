@@ -117,36 +117,64 @@ export async function GET(request: NextRequest) {
     return redirect("error", "pages_fetch_failed");
   }
 
-  // Find the first Facebook Page that has a linked IG Business account
-  const pageWithIG = pagesData.data.find(
+  // Collect every Facebook Page that has a linked IG Business account.
+  // A user may manage multiple Pages, each with its own IG account.
+  const pagesWithIG = pagesData.data.filter(
     (page) => page.instagram_business_account?.id
   );
 
-  if (!pageWithIG?.instagram_business_account) {
+  console.log(
+    `[meta/callback] Pages returned: ${pagesData.data.length} · with IG account: ${pagesWithIG.length}`
+  );
+
+  if (pagesWithIG.length === 0) {
     return redirect("error", "no_ig_account");
   }
 
-  const igAccount = pageWithIG.instagram_business_account;
-  const accountName =
-    igAccount.username ?? igAccount.name ?? pageWithIG.name;
-
-  // --- Step 4: upsert into connected_accounts ---
+  // --- Step 4: upsert every found IG account into connected_accounts ---
   // ig_user_id has a unique index — reconnecting the same account refreshes the token.
   // access_token is stored server-side and never returned to the client.
-  const { error: dbError } = await supabaseServer
-    .from("connected_accounts")
-    .upsert(
-      {
-        platform: "instagram",
-        account_name: accountName,
-        ig_user_id: igAccount.id,
-        access_token: longLivedToken,
-        token_expires_at: tokenExpiresAt,
-      },
-      { onConflict: "ig_user_id" }
-    );
+  // Each account is upserted independently so one failure doesn't block the others.
+  let savedCount = 0;
+  let failedCount = 0;
 
-  if (dbError) {
+  for (const page of pagesWithIG) {
+    const igAccount = page.instagram_business_account!;
+    const accountName = igAccount.username ?? igAccount.name ?? page.name;
+
+    const { error: dbError } = await supabaseServer
+      .from("connected_accounts")
+      .upsert(
+        {
+          platform: "instagram",
+          account_name: accountName,
+          ig_user_id: igAccount.id,
+          access_token: longLivedToken,
+          token_expires_at: tokenExpiresAt,
+        },
+        { onConflict: "ig_user_id" }
+      );
+
+    if (dbError) {
+      failedCount++;
+      // Log the account name (public) and error message — never the token.
+      console.error(
+        `[meta/callback] Failed to save @${accountName} (ig_user_id ${igAccount.id}): ${dbError.message}`
+      );
+    } else {
+      savedCount++;
+      console.log(
+        `[meta/callback] Saved @${accountName} (ig_user_id ${igAccount.id})`
+      );
+    }
+  }
+
+  console.log(
+    `[meta/callback] IG accounts found: ${pagesWithIG.length} · saved: ${savedCount} · failed: ${failedCount}`
+  );
+
+  // If every account failed to save, surface the DB error.
+  if (savedCount === 0) {
     return redirect("error", "db_write_failed");
   }
 
