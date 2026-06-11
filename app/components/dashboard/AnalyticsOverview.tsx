@@ -65,6 +65,14 @@ export default function AnalyticsOverview() {
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
+  // Refresh when another section reconciles data (e.g. Analytics detects a post
+  // was deleted on Instagram). No Meta call here — just re-reads stored data.
+  useEffect(() => {
+    const handler = () => fetchAll();
+    window.addEventListener("ig:data-changed", handler);
+    return () => window.removeEventListener("ig:data-changed", handler);
+  }, [fetchAll]);
+
   // ── Compute from stored data only (no Meta calls) ───────────────────────────
   const published = posts.filter(p => p.status === "published" || p.status === "republished").length;
   const scheduled = posts.filter(p => p.status === "scheduled").length;

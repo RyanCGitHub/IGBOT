@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase-server";
 import { requireApiKey } from "@/lib/auth";
-import { createLogger, getMediaInsights } from "@/lib/instagram";
+import { createLogger, getMediaInsights, MEDIA_DELETED_CODES } from "@/lib/instagram";
 
 type Params = { id: string };
 
@@ -69,8 +69,31 @@ export async function POST(
   const result = await getMediaInsights(post.media_id, account.access_token, log);
   const now = new Date().toISOString();
 
-  // Hard failure (couldn't even read like/comment fields) — record and surface.
+  // Hard failure (couldn't even read like/comment fields).
   if ("error" in result) {
+    // Externally deleted? Only when Meta CLEARLY says the object is gone (100/803).
+    // Auth (190), rate-limit (32/4), and unknown errors must NOT mark a post deleted.
+    if (result.code != null && MEDIA_DELETED_CODES.has(result.code)) {
+      await supabaseServer
+        .from("ig_posts")
+        .update({
+          status: "deleted_on_instagram",
+          deleted_detected_at: now,
+          last_instagram_sync_at: now,
+          updated_at: now,
+        })
+        .eq("id", postId);
+
+      console.log(`[ig-posts/${postId}/insights] media gone on Instagram (code ${result.code}) → marked deleted_on_instagram`);
+
+      return NextResponse.json({
+        success: true,
+        result: "deleted_on_instagram",
+        message: "This post no longer exists on Instagram. Marked deleted locally.",
+      });
+    }
+
+    // Auth / rate-limit / unknown — record the error, never change status.
     await supabaseServer
       .from("post_insights")
       .upsert(

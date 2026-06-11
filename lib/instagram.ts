@@ -213,11 +213,16 @@ export type MediaInsights = {
 // degrade gracefully — likes/comments always come from the media fields below.
 const IMAGE_INSIGHT_METRICS = ["reach", "saved", "shares", "total_interactions"] as const;
 
+// Graph error codes that mean the media object no longer exists (deleted on IG).
+// Same set the /[id]/sync route uses. Auth (190) and rate-limit (32, 4) codes are
+// deliberately NOT here — those must never be treated as a deletion.
+export const MEDIA_DELETED_CODES = new Set<number>([100, 803]);
+
 export async function getMediaInsights(
   mediaId: string,
   accessToken: string,
   log: PublishLogger
-): Promise<MediaInsights | { error: string }> {
+): Promise<MediaInsights | { error: string; code?: number }> {
   const raw: Record<string, unknown> = {};
 
   // ── 1) Media fields: like_count, comments_count (reliable for owned media) ──
@@ -247,7 +252,11 @@ export async function getMediaInsights(
       response: { status: res.status, body: data },
     });
 
-    if (!res.ok || data.error) return { error: data.error?.message ?? `HTTP ${res.status}` };
+    if (!res.ok || data.error) {
+      // Surface the Graph code so the caller can distinguish "media deleted"
+      // from auth / rate-limit / unknown errors.
+      return { error: data.error?.message ?? `HTTP ${res.status}`, code: data.error?.code };
+    }
     likes = typeof data.like_count === 'number' ? data.like_count : null;
     comments = typeof data.comments_count === 'number' ? data.comments_count : null;
   } catch (e) {

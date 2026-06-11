@@ -138,6 +138,7 @@ export default function Analytics() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [syncingId, setSyncingId] = useState<number | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const fetchAll = useCallback(async () => {
     setIsLoading(true);
@@ -179,10 +180,22 @@ export default function Analytics() {
 
   async function handleSync(postId: number) {
     setSyncingId(postId);
+    setNotice(null);
     try {
       const res = await apiFetch(`/api/ig-posts/${postId}/insights`, { method: "POST" });
       const data = await res.json();
       if (!res.ok || !data.success) { alert(data.error ?? "Sync failed."); return; }
+
+      // Reconciliation: the media was deleted on Instagram. The post is now
+      // deleted_on_instagram and drops out of the published list.
+      if (data.result === "deleted_on_instagram") {
+        setNotice(data.message ?? "This post no longer exists on Instagram. Marked deleted locally.");
+        await fetchAll();
+        // Let the dashboard's Analytics Overview refresh its counts too.
+        window.dispatchEvent(new Event("ig:data-changed"));
+        return;
+      }
+
       setInsights(prev => ({ ...prev, [postId]: data.insights as PostInsights }));
     } finally {
       setSyncingId(null);
@@ -217,6 +230,12 @@ export default function Analytics() {
           </button>
         </div>
       </div>
+
+      {notice && (
+        <p className="mt-4 rounded-2xl border border-orange-500/30 bg-orange-500/10 px-3 py-2 text-xs text-orange-300">
+          {notice}
+        </p>
+      )}
 
       {/* List */}
       <div className="mt-6 space-y-3">
