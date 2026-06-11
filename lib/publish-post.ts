@@ -55,12 +55,17 @@ export async function publishIgPost(
   // ── Fetch post ──────────────────────────────────────────────────────────────
   const { data: post, error: postErr } = await supabaseServer
     .from("ig_posts")
-    .select("id, caption, image_url, account_id, status, media_id, original_media_id")
+    .select("id, caption, image_url, account_id, status, media_id, original_media_id, media_type")
     .eq("id", postId)
     .single();
 
   if (postErr || !post) {
     return err("Post not found.", 404);
+  }
+  if (post.media_type === "reel") {
+    // Reels are produced and published by the reels pipeline (reel_runs +
+    // /api/reels/tick) — this image container flow would corrupt them.
+    return err("This is a Reel — it is published by the Reels pipeline, not the image publisher.", 400);
   }
   if (!post.image_url) {
     return err("Post has no image — upload an image first.", 400);

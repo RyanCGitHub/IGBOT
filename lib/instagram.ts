@@ -74,6 +74,86 @@ export async function createMediaContainer(
   return { containerId: data.id };
 }
 
+// ─── Create REELS media container ─────────────────────────────────────────────
+// Same flow as images but media_type=REELS + video_url. Video containers take
+// much longer to reach FINISHED — callers poll across scheduler ticks with
+// checkContainerStatus instead of blocking in pollContainerStatus.
+
+export async function createReelsContainer(
+  igUserId: string,
+  accessToken: string,
+  videoUrl: string,
+  caption: string,
+  log: PublishLogger
+): Promise<{ containerId: string } | { error: string }> {
+  const url = `https://graph.facebook.com/v21.0/${igUserId}/media`;
+  const body = {
+    media_type: 'REELS',
+    video_url: videoUrl,
+    caption,
+    share_to_feed: true,
+  };
+
+  log.add({
+    step: 'create_reels_container',
+    status: 'info',
+    detail: `POST /v21.0/[IG_USER_ID]/media (REELS)`,
+    request: {
+      url: `https://graph.facebook.com/v21.0/[IG_USER_ID]/media`,
+      method: 'POST',
+      body: { ...body, access_token: '[REDACTED]' },
+    },
+  });
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...body, access_token: accessToken }),
+  });
+  const data = (await res.json()) as { id?: string } & IGError;
+
+  log.add({
+    step: 'create_reels_container_response',
+    status: res.ok && data.id ? 'success' : 'error',
+    detail: res.ok && data.id
+      ? `Reels container created — ID: ${data.id}`
+      : `Failed — ${data.error?.message ?? `HTTP ${res.status}`}`,
+    response: { status: res.status, body: data },
+  });
+
+  if (!res.ok || !data.id) return { error: data.error?.message ?? `HTTP ${res.status}` };
+  return { containerId: data.id };
+}
+
+// ─── Single container status check (cross-tick polling) ──────────────────────
+
+export async function checkContainerStatus(
+  containerId: string,
+  accessToken: string,
+  log: PublishLogger
+): Promise<{ statusCode: 'IN_PROGRESS' | 'FINISHED' } | { error: string }> {
+  const url = `https://graph.facebook.com/v21.0/${containerId}?fields=status_code,status&access_token=${accessToken}`;
+  const displayUrl = `https://graph.facebook.com/v21.0/${containerId}?fields=status_code,status&access_token=[REDACTED]`;
+
+  log.add({ step: 'check_container', status: 'info', detail: 'Single container status check', request: { url: displayUrl } });
+
+  const res = await fetch(url);
+  const data = (await res.json()) as { status_code?: string; status?: string } & IGError;
+
+  log.add({
+    step: 'check_container_response',
+    status: res.ok ? 'info' : 'error',
+    detail: res.ok ? `status_code = ${data.status_code ?? 'unknown'}` : `Error: ${data.error?.message ?? `HTTP ${res.status}`}`,
+    response: { status: res.status, body: data },
+  });
+
+  if (!res.ok) return { error: data.error?.message ?? `HTTP ${res.status}` };
+  if (data.status_code === 'FINISHED') return { statusCode: 'FINISHED' };
+  if (data.status_code === 'ERROR') return { error: data.status ?? 'Container processing failed' };
+  if (data.status_code === 'EXPIRED') return { error: 'Container expired before publishing' };
+  return { statusCode: 'IN_PROGRESS' };
+}
+
 // ─── Poll container status ────────────────────────────────────────────────────
 
 type StatusCode = 'IN_PROGRESS' | 'FINISHED' | 'ERROR' | 'EXPIRED' | 'PUBLISHED';
@@ -213,6 +293,9 @@ export type MediaInsights = {
 // degrade gracefully — likes/comments always come from the media fields below.
 const IMAGE_INSIGHT_METRICS = ["reach", "saved", "shares", "total_interactions"] as const;
 
+// Reels support "views" (the v22+ unified play metric) on top of the image set.
+const REELS_INSIGHT_METRICS = ["reach", "saved", "shares", "total_interactions", "views"] as const;
+
 // Graph error codes that mean the media object no longer exists (deleted on IG).
 // Same set the /[id]/sync route uses. Auth (190) and rate-limit (32, 4) codes are
 // deliberately NOT here — those must never be treated as a deletion.
@@ -221,7 +304,8 @@ export const MEDIA_DELETED_CODES = new Set<number>([100, 803]);
 export async function getMediaInsights(
   mediaId: string,
   accessToken: string,
-  log: PublishLogger
+  log: PublishLogger,
+  mediaProductType: 'IMAGE' | 'REELS' = 'IMAGE'
 ): Promise<MediaInsights | { error: string; code?: number }> {
   const raw: Record<string, unknown> = {};
 
@@ -264,7 +348,7 @@ export async function getMediaInsights(
   }
 
   // ── 2) Insights metrics (degrade gracefully if unavailable) ────────────────
-  const metricParam = IMAGE_INSIGHT_METRICS.join(',');
+  const metricParam = (mediaProductType === 'REELS' ? REELS_INSIGHT_METRICS : IMAGE_INSIGHT_METRICS).join(',');
   const insightsUrl = `https://graph.facebook.com/v21.0/${mediaId}/insights?metric=${metricParam}&access_token=${accessToken}`;
   const insightsDisplay = `https://graph.facebook.com/v21.0/${mediaId}/insights?metric=${metricParam}&access_token=[REDACTED]`;
 
@@ -278,6 +362,7 @@ export async function getMediaInsights(
   let reach: number | null = null;
   let saves: number | null = null;
   let shares: number | null = null;
+  let views: number | null = null;
   let insightsError: string | null = null;
 
   try {
@@ -304,10 +389,11 @@ export async function getMediaInsights(
       reach = map.get('reach') ?? null;
       saves = map.get('saved') ?? null;
       shares = map.get('shares') ?? null;
+      views = map.get('views') ?? null;
       log.add({
         step: 'insights_metrics_response',
         status: 'success',
-        detail: `reach=${reach ?? '?'} saved=${saves ?? '?'} shares=${shares ?? '?'}`,
+        detail: `reach=${reach ?? '?'} saved=${saves ?? '?'} shares=${shares ?? '?'} views=${views ?? '?'}`,
         response: { status: res.status, body: data },
       });
     }
@@ -316,7 +402,7 @@ export async function getMediaInsights(
     log.add({ step: 'insights_metrics_response', status: 'error', detail: insightsError });
   }
 
-  // impressions/views are intentionally not requested for single-image posts
-  // (impressions is deprecated in v21; views/plays apply to video). Left null.
-  return { likes, comments, reach, impressions: null, saves, shares, views: null, raw, insightsError };
+  // impressions is intentionally never requested (deprecated in v21). views is
+  // only populated for REELS — it is not a valid single-image metric.
+  return { likes, comments, reach, impressions: null, saves, shares, views, raw, insightsError };
 }

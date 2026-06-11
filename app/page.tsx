@@ -16,6 +16,7 @@ import ContentPlanner from "@/app/components/ContentPlanner";
 import SchedulingAssistant from "@/app/components/SchedulingAssistant";
 import PerformanceReview from "@/app/components/PerformanceReview";
 import LearningEngine from "@/app/components/LearningEngine";
+import ReelsAutopilot from "@/app/components/ReelsAutopilot";
 import CreatePost from "@/app/components/CreatePost";
 import PostLibrary from "@/app/components/PostLibrary";
 import Analytics from "@/app/components/Analytics";
@@ -124,7 +125,12 @@ export default function Home() {
       {/* 3. Command center */}
       <ApprovalQueue />
 
-      {/* 4. Campaigns */}
+      {/* 4. Reels autopilot — the autonomous video pipeline */}
+      <SectionCard title="Reels Autopilot" subtitle="Idea → video → audio → caption → publish → learn, fully automatic" collapsible defaultOpen>
+        <ReelsAutopilot />
+      </SectionCard>
+
+      {/* 5. Campaigns */}
       <Campaigns />
 
       {/* 5. AI workflow — collapsible */}

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase-server";
 import { publishIgPost } from "@/lib/publish-post";
+import { publishingPaused, pausedResponse } from "@/lib/cron-auth";
 
 const BATCH_SIZE = 5;
 
@@ -30,7 +31,11 @@ function requireCronAuth(request: Request): NextResponse | null {
 export async function POST(request: Request) {
   const authError = requireCronAuth(request);
   if (authError) return authError;
+  if (publishingPaused()) return pausedResponse();
+  return processDuePosts();
+}
 
+async function processDuePosts() {
   const now = new Date().toISOString();
 
   // ── Find due posts ──────────────────────────────────────────────────────────
@@ -118,9 +123,11 @@ export async function POST(request: Request) {
   });
 }
 
-// Vercel cron also sends GET for health checks — return 200
+// Vercel cron invokes GET — it must do the real work, not just health-check.
+// (Previously GET was a no-op, so the cron never actually published anything.)
 export async function GET(request: Request) {
   const authError = requireCronAuth(request);
   if (authError) return authError;
-  return NextResponse.json({ success: true, status: "scheduler ready" });
+  if (publishingPaused()) return pausedResponse();
+  return processDuePosts();
 }

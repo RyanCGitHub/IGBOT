@@ -25,7 +25,9 @@ export async function GET(request: Request) {
   const params = new URLSearchParams({
     client_id: appId,
     redirect_uri: redirectUri,
-    scope: "instagram_basic,pages_show_list,instagram_content_publish",
+    // instagram_manage_insights + pages_read_engagement unlock reach/saves/
+    // shares/views for the learning engine — reconnect the account to grant them.
+    scope: "instagram_basic,pages_show_list,instagram_content_publish,instagram_manage_insights,pages_read_engagement",
     response_type: "code",
     state,
   });

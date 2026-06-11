@@ -2,7 +2,19 @@
   "crons": [
     {
       "path": "/api/ig-posts/process-scheduled",
-      "schedule": "0 9 * * *"
+      "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/reels/plan",
+      "schedule": "0 8 * * *"
+    },
+    {
+      "path": "/api/reels/tick",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/reels/measure",
+      "schedule": "30 6 * * *"
     }
   ]
 }
