@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { anthropic } from "@/lib/claude";
 import { requireApiKey } from "@/lib/auth";
 import type { CaptionOption } from "@/lib/supabase";
+import { getPersonaForAccount, personaPromptBlock, applyDisclosure } from "@/lib/persona";
 
 const MAX_BYTES = 8 * 1024 * 1024;
 const ACCEPTED_TYPES = ["image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif"] as const;
@@ -116,6 +117,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: false, error: "Image must be 8 MB or smaller." }, { status: 400 });
   }
 
+  // Optional persona context — keeps captions in-character for this account.
+  const accountIdRaw = formData.get("account_id");
+  const accountId = accountIdRaw != null && String(accountIdRaw).trim() ? Number(accountIdRaw) : null;
+  const persona = await getPersonaForAccount(Number.isInteger(accountId) ? accountId : null);
+  const personaBlock = personaPromptBlock(persona);
+
   const arrayBuffer = await file.arrayBuffer();
   const base64 = Buffer.from(arrayBuffer).toString("base64");
 
@@ -141,7 +148,7 @@ export async function POST(request: Request) {
           role: "user",
           content: [
             { type: "image", source: { type: "base64", media_type: mediaType, data: base64 } },
-            { type: "text", text: VISION_PROMPT },
+            { type: "text", text: personaBlock ? `${personaBlock}\n\n${VISION_PROMPT}` : VISION_PROMPT },
           ],
         },
       ],
@@ -177,8 +184,13 @@ export async function POST(request: Request) {
     );
   }
 
+  // Apply the persona's AI-disclosure label to each caption (still editable in the draft).
+  const captionOptions = persona
+    ? parsed.captionOptions.map(o => ({ ...o, caption: applyDisclosure(o.caption, persona) }))
+    : parsed.captionOptions;
+
   // Backward-compat: caption = professional option full text
-  const firstOption = parsed.captionOptions[0];
+  const firstOption = captionOptions[0];
   const caption = [firstOption.caption, firstOption.hashtags].filter(Boolean).join("\n\n");
 
   console.log(`[IG Analyze] Done. Category: ${parsed.analysis.category}. Options: ${parsed.captionOptions.length}`);
@@ -187,7 +199,7 @@ export async function POST(request: Request) {
     success: true,
     analysis: parsed.analysis,
     caption,
-    captionOptions: parsed.captionOptions,
+    captionOptions,
     debug: {
       model,
       imageSentToAI: true,

@@ -3,6 +3,7 @@ import { anthropic } from "@/lib/claude";
 import { requireApiKey } from "@/lib/auth";
 import { supabaseServer } from "@/lib/supabase-server";
 import type { GeneratedIdea } from "@/lib/supabase";
+import { getPersonaForAccount, personaPromptBlock } from "@/lib/persona";
 
 const NOTES_MAX = 2_000;
 const MODEL = "claude-sonnet-4-5";
@@ -103,6 +104,10 @@ export async function POST(request: Request) {
     accountName = acct?.account_name ?? null;
   }
 
+  // Persona context (in-character generation when the account has one)
+  const persona = await getPersonaForAccount(campaign.account_id);
+  const personaBlock = personaPromptBlock(persona);
+
   console.log(`[content-ideas/generate] campaign ${campaignId} "${campaign.name}" → ${count} ideas via ${MODEL}`);
 
   // ── Generate ──────────────────────────────────────────────────────────────────
@@ -111,7 +116,7 @@ export async function POST(request: Request) {
     const response = await anthropic.messages.create({
       model: MODEL,
       max_tokens: 2048,
-      messages: [{ role: "user", content: buildPrompt(campaign, accountName, notes || null, count) }],
+      messages: [{ role: "user", content: (personaBlock ? `${personaBlock}\n\n` : "") + buildPrompt(campaign, accountName, notes || null, count) }],
     });
     const block = response.content.find(b => b.type === "text");
     rawText = block && "text" in block ? block.text : "";

@@ -9,6 +9,7 @@ import SectionCard from "@/app/components/dashboard/SectionCard";
 import AnalyticsOverview from "@/app/components/dashboard/AnalyticsOverview";
 
 import InstagramConnection from "@/app/components/InstagramConnection";
+import AIPersonas from "@/app/components/AIPersonas";
 import ApprovalQueue from "@/app/components/ApprovalQueue";
 import Campaigns from "@/app/components/Campaigns";
 import ContentPlanner from "@/app/components/ContentPlanner";
@@ -113,7 +114,10 @@ export default function Home() {
       {/* 1. Connection / status */}
       <InstagramConnection />
 
-      {/* 2. Top analytics overview — real numbers from stored data */}
+      {/* 2. AI Personas — per-account in-character profiles */}
+      <AIPersonas />
+
+      {/* 3. Top analytics overview — real numbers from stored data */}
       <AnalyticsOverview />
 
       {/* 3. Command center */}

@@ -3,6 +3,7 @@ import { anthropic } from "@/lib/claude";
 import { requireApiKey } from "@/lib/auth";
 import { supabaseServer } from "@/lib/supabase-server";
 import type { ScheduleSuggestion } from "@/lib/supabase";
+import { getPersonaForAccount, personaPromptBlock } from "@/lib/persona";
 
 const NOTES_MAX = 2_000;
 const MODEL = "claude-sonnet-4-5";
@@ -140,6 +141,10 @@ export async function POST(request: Request) {
     accountName = data?.account_name ?? null;
   }
 
+  // Persona context (in-character suggestions when the account has one)
+  const persona = await getPersonaForAccount(body.account_id ?? null);
+  const personaBlock = personaPromptBlock(persona);
+
   // ── Existing scheduled posts in the window (occupied slots) ──────────────────
   let occupiedQuery = supabaseServer
     .from("ig_posts")
@@ -172,7 +177,7 @@ export async function POST(request: Request) {
       messages: [
         {
           role: "user",
-          content: buildPrompt({ campaign, accountName, startIso, endIso, count, notes: notes || null, occupied }),
+          content: (personaBlock ? `${personaBlock}\n\n` : "") + buildPrompt({ campaign, accountName, startIso, endIso, count, notes: notes || null, occupied }),
         },
       ],
     });

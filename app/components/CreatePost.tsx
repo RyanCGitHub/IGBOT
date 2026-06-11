@@ -294,6 +294,8 @@ export default function CreatePost() {
     try {
       const fd = new FormData();
       fd.append("file", file);
+      // Persona-aware captions: tell analyze which account this is for.
+      if (selectedAccountId != null) fd.append("account_id", String(selectedAccountId));
       const res = await apiFetch("/api/instagram/analyze", { method: "POST", body: fd });
       const data = await res.json();
       if (!res.ok || !data.success) throw new Error(data.error ?? "Analysis failed.");
