@@ -28,6 +28,27 @@ export type ConnectedAccount = {
   created_at: string;
 };
 
+// ─── Personas (Milestone 1) ─────────────────────────────────────────────────────
+// One persona per connected account (unique account_id). Drives in-character AI
+// generation in later milestones; with no persona, all flows behave as today.
+export type Persona = {
+  id: number;
+  account_id: number;
+  name: string;
+  handle_display: string | null;
+  persona_type: string | null;
+  bio: string | null;
+  voice_and_tone: string | null;
+  visual_style: string | null;
+  content_pillars: string[] | null;
+  audience_description: string | null;
+  hashtag_strategy: string | null;
+  ai_disclosure_enabled: boolean;
+  ai_disclosure_text: string;
+  created_at: string;
+  updated_at: string;
+};
+
 // ─── Campaigns ────────────────────────────────────────────────────────────────
 
 export type Campaign = {
@@ -125,6 +146,22 @@ export type PerformanceReview = {
   metrics_note: string;
   limited: boolean;
   recommendations: PerformanceRecommendation[];
+};
+
+// ─── Generated media (Part 2) ───────────────────────────────────────────────────
+export type GeneratedMedia = {
+  id: number;
+  account_id: number | null;
+  persona_id: number | null;
+  draft_id: number | null;
+  prompt_used: string;
+  provider: string;
+  storage_path: string | null;
+  media_type: string;          // 'image' | 'video'
+  status: string;              // 'generated' | 'failed' | …
+  provider_meta: Record<string, unknown> | null;
+  error_message: string | null;
+  created_at: string;
 };
 
 export type PostStatus = 'draft' | 'approved' | 'scheduled' | 'posted';
