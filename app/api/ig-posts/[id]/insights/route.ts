@@ -24,7 +24,7 @@ export async function POST(
   // ── Fetch the post ──────────────────────────────────────────────────────────
   const { data: post, error: postErr } = await supabaseServer
     .from("ig_posts")
-    .select("id, status, media_id, account_id")
+    .select("id, status, media_id, account_id, media_type")
     .eq("id", postId)
     .single();
 
@@ -66,7 +66,12 @@ export async function POST(
 
   // ── Fetch insights (read-only) ──────────────────────────────────────────────
   const log = createLogger();
-  const result = await getMediaInsights(post.media_id, account.access_token, log);
+  const result = await getMediaInsights(
+    post.media_id,
+    account.access_token,
+    log,
+    post.media_type === "reel" ? "REELS" : "IMAGE"
+  );
   const now = new Date().toISOString();
 
   // Hard failure (couldn't even read like/comment fields).

@@ -28,6 +28,42 @@ export type ConnectedAccount = {
   created_at: string;
 };
 
+// ─── Reels autopilot (browser-safe views) ───────────────────────────────────────
+
+// Per-account pipeline settings — the only human control surface.
+export type ReelsAccountSettings = {
+  id: number;
+  account_name: string;
+  reels_autopilot_enabled: boolean;
+  reels_daily_cap: number;
+  niche: string | null;
+  posting_hour_utc: number | null;
+};
+
+// Trimmed run view returned by /api/reels/runs (full briefs stay server-side).
+export type ReelRunView = {
+  id: number;
+  account_id: number;
+  account_name: string | null;
+  status: string;
+  failed_stage: string | null;
+  title: string | null;
+  hook: string | null;
+  beats: number;
+  audio_mood: string | null;
+  keyframes_done: number;
+  clips_done: number;
+  video_url: string | null;
+  caption_preview: string | null;
+  scheduled_for: string | null;
+  permalink: string | null;
+  error_message: string | null;
+  attempt_count: number;
+  published_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 // ─── Personas (Milestone 1) ─────────────────────────────────────────────────────
 // One persona per connected account (unique account_id). Drives in-character AI
 // generation in later milestones; with no persona, all flows behave as today.
@@ -255,6 +291,9 @@ export type IgPost = {
   id: number;
   title: string;
   caption: string;
+  media_type: string;                  // 'image' | 'reel'
+  video_url: string | null;            // reels only
+  video_storage_path: string | null;   // reels only
   image_url: string | null;
   image_storage_path: string | null;
   image_analysis: Record<string, unknown> | null;
