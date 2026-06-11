@@ -43,12 +43,36 @@ export default function DraftEditor({
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
   const [genPromptUsed, setGenPromptUsed] = useState<string | null>(null);
 
+  // Post attributes (Part 3 learning engine)
+  const [attrContentPillar, setAttrContentPillar] = useState("");
+  const [attrCaptionStyle, setAttrCaptionStyle] = useState("");
+  const [attrImageStyle, setAttrImageStyle] = useState("");
+  const [attrHashtags, setAttrHashtags] = useState("");
+  const [attrMediaSource, setAttrMediaSource] = useState<string | null>(null);
+
   useEffect(() => {
     apiFetch("/api/personas")
       .then(r => r.json())
       .then(d => { if (d.success) setPersonas(d.personas as Persona[]); })
       .catch(() => {});
   }, []);
+
+  // Load existing attributes for this draft
+  useEffect(() => {
+    apiFetch(`/api/ig-posts/${post.id}/attributes`)
+      .then(r => r.json())
+      .then(d => {
+        const a = d.success ? d.attributes : null;
+        if (a) {
+          setAttrContentPillar(a.content_pillar ?? "");
+          setAttrCaptionStyle(a.caption_style ?? "");
+          setAttrImageStyle(a.image_style_summary ?? "");
+          setAttrHashtags(Array.isArray(a.hashtag_set) ? a.hashtag_set.join(", ") : "");
+          setAttrMediaSource(a.media_source ?? null);
+        }
+      })
+      .catch(() => {});
+  }, [post.id]);
 
   const hasImage = !!imageUrl;
   const hasAccount = accountId != null;
@@ -123,6 +147,19 @@ export default function DraftEditor({
       setError(data.error ?? "Save failed.");
       return false;
     }
+
+    // Persist attributes alongside the post (best-effort; media_source auto-derived server-side).
+    await apiFetch(`/api/ig-posts/${post.id}/attributes`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        content_pillar: attrContentPillar.trim() || undefined,
+        caption_style: attrCaptionStyle.trim() || undefined,
+        image_style_summary: attrImageStyle.trim() || undefined,
+        hashtag_set: attrHashtags.split(",").map(s => s.trim()).filter(Boolean),
+      }),
+    }).catch(() => {});
+
     return true;
   }
 
@@ -338,6 +375,59 @@ export default function DraftEditor({
             ))}
           </select>
         </div>
+      </div>
+
+      {/* Post attributes (learning engine) */}
+      <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-3">
+        <p className="text-xs font-semibold text-slate-400">
+          Post attributes <span className="text-slate-600">(used by the Learning Engine)</span>
+        </p>
+        <div className="mt-2 grid gap-2 sm:grid-cols-2">
+          <div className="flex flex-col gap-1">
+            <label className="text-[10px] uppercase tracking-wide text-slate-500">Content pillar</label>
+            <input
+              value={attrContentPillar}
+              onChange={e => setAttrContentPillar(e.target.value)}
+              disabled={isWorking}
+              className="rounded-xl bg-slate-800/80 px-3 py-2 text-sm text-slate-100 outline-none ring-1 ring-white/10 focus:ring-fuchsia-500/40 disabled:opacity-50"
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-[10px] uppercase tracking-wide text-slate-500">Caption style</label>
+            <select
+              value={attrCaptionStyle}
+              onChange={e => setAttrCaptionStyle(e.target.value)}
+              disabled={isWorking}
+              className="rounded-xl bg-slate-800/80 px-3 py-2 text-sm text-slate-100 outline-none ring-1 ring-white/10 focus:ring-fuchsia-500/40 disabled:opacity-50"
+            >
+              <option value="">—</option>
+              {["hook-question", "storytelling", "listicle", "cta-heavy", "short-viral"].map(s => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex flex-col gap-1 sm:col-span-2">
+            <label className="text-[10px] uppercase tracking-wide text-slate-500">Image style summary</label>
+            <input
+              value={attrImageStyle}
+              onChange={e => setAttrImageStyle(e.target.value)}
+              disabled={isWorking}
+              className="rounded-xl bg-slate-800/80 px-3 py-2 text-sm text-slate-100 outline-none ring-1 ring-white/10 focus:ring-fuchsia-500/40 disabled:opacity-50"
+            />
+          </div>
+          <div className="flex flex-col gap-1 sm:col-span-2">
+            <label className="text-[10px] uppercase tracking-wide text-slate-500">Hashtag set <span className="text-slate-600">(comma-separated)</span></label>
+            <input
+              value={attrHashtags}
+              onChange={e => setAttrHashtags(e.target.value)}
+              disabled={isWorking}
+              className="rounded-xl bg-slate-800/80 px-3 py-2 text-sm text-slate-100 outline-none ring-1 ring-white/10 focus:ring-fuchsia-500/40 disabled:opacity-50"
+            />
+          </div>
+        </div>
+        <p className="mt-1.5 text-[10px] text-slate-600">
+          media source: {attrMediaSource ?? "auto-detected on save"} · saved with the draft
+        </p>
       </div>
 
       {/* Gating message */}

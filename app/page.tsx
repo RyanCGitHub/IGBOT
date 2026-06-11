@@ -15,6 +15,7 @@ import Campaigns from "@/app/components/Campaigns";
 import ContentPlanner from "@/app/components/ContentPlanner";
 import SchedulingAssistant from "@/app/components/SchedulingAssistant";
 import PerformanceReview from "@/app/components/PerformanceReview";
+import LearningEngine from "@/app/components/LearningEngine";
 import CreatePost from "@/app/components/CreatePost";
 import PostLibrary from "@/app/components/PostLibrary";
 import Analytics from "@/app/components/Analytics";
@@ -137,6 +138,10 @@ export default function Home() {
 
       <SectionCard title="Performance Review" subtitle="AI analysis of published performance" collapsible defaultOpen={false}>
         <PerformanceReview />
+      </SectionCard>
+
+      <SectionCard title="Learning Engine" subtitle="What's working by attribute — from stored insights" collapsible defaultOpen={false}>
+        <LearningEngine />
       </SectionCard>
 
       {/* 6. Manual entry — collapsible */}
