@@ -23,11 +23,11 @@ const READINESS_LABEL: Record<Readiness, string> = {
 };
 
 const READINESS_BADGE: Record<Readiness, string> = {
-  idea_ready: "bg-sky-500/10 text-sky-300 ring-sky-400/20",
-  draft_incomplete: "bg-amber-500/10 text-amber-300 ring-amber-400/20",
-  draft_ready: "bg-emerald-500/10 text-emerald-300 ring-emerald-400/20",
-  scheduled: "bg-violet-500/10 text-violet-300 ring-violet-400/20",
-  failed: "bg-rose-500/10 text-rose-300 ring-rose-400/20",
+  idea_ready: "bg-sky-50 text-sky-700 ring-sky-200",
+  draft_incomplete: "bg-amber-50 text-amber-700 ring-amber-200",
+  draft_ready: "bg-emerald-50 text-emerald-700 ring-emerald-200",
+  scheduled: "bg-violet-50 text-violet-700 ring-violet-200",
+  failed: "bg-rose-50 text-rose-700 ring-rose-200",
 };
 
 const NEXT_ACTION: Record<Readiness, string> = {
@@ -89,10 +89,11 @@ function QueueRow({
   onUnschedule: () => void;
   onRefresh: () => void;
 }) {
-  // A draft being edited swaps the row for the shared DraftEditor.
+  // A draft being edited swaps the row for the shared DraftEditor (still dark —
+  // its own restyle is a later Part 4 section; wrapped in a light container).
   if (isEditing && item.post) {
     return (
-      <div className="rounded-3xl bg-slate-950/80 p-4 ring-1 ring-white/5">
+      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
         <DraftEditor
           post={item.post}
           accounts={accounts}
@@ -105,7 +106,7 @@ function QueueRow({
   }
 
   return (
-    <div className="rounded-3xl bg-slate-950/80 p-4 ring-1 ring-white/5">
+    <div className="rounded-2xl border border-slate-200 bg-white p-4 transition hover:shadow-sm">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
@@ -113,36 +114,38 @@ function QueueRow({
               {READINESS_LABEL[item.readiness]}
             </span>
             {campaignName && (
-              <span className="rounded-full bg-fuchsia-500/10 px-2 py-0.5 text-[10px] text-fuchsia-300 ring-1 ring-fuchsia-400/20">{campaignName}</span>
+              <span className="rounded-full bg-fuchsia-50 px-2 py-0.5 text-[10px] text-fuchsia-700 ring-1 ring-fuchsia-200">{campaignName}</span>
             )}
             {accountName && (
-              <span className="flex items-center gap-1 text-[10px] text-slate-400">
-                <span className="h-1.5 w-1.5 rounded-full bg-slate-600" />@{accountName}
+              <span className="flex items-center gap-1 text-[10px] text-slate-500">
+                <span className="h-1.5 w-1.5 rounded-full bg-slate-300" />@{accountName}
               </span>
             )}
           </div>
 
-          <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-200">{item.preview}</p>
+          <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-700">{item.preview}</p>
 
           {item.missing.length > 0 && (
-            <p className="mt-1.5 text-xs text-amber-400">Missing: {item.missing.join(" + ")}</p>
+            <p className="mt-1.5 text-xs text-amber-600">Missing: {item.missing.join(" + ")}</p>
           )}
-          <p className="mt-1 text-xs text-slate-600">Next: {NEXT_ACTION[item.readiness]}</p>
+          <p className="mt-1 text-xs text-slate-400">Next: {NEXT_ACTION[item.readiness]}</p>
         </div>
 
         {/* Actions — one explicit click each */}
         <div className="flex shrink-0 flex-col items-end gap-1.5">
           {item.readiness === "idea_ready" && (
             <button type="button" onClick={onCreateDraft} disabled={isBusy}
-              className="rounded-2xl bg-fuchsia-500 px-3 py-1 text-xs font-semibold text-white transition hover:bg-fuchsia-400 disabled:opacity-50">
+              className="rounded-xl bg-fuchsia-500 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-fuchsia-400 disabled:opacity-50">
               {isBusy ? "Creating…" : "Create Draft"}
             </button>
           )}
 
           {(item.readiness === "draft_incomplete" || item.readiness === "draft_ready") && (
             <button type="button" onClick={onEdit}
-              className={`rounded-2xl px-3 py-1 text-xs font-semibold text-white transition ${
-                item.readiness === "draft_ready" ? "bg-fuchsia-500 hover:bg-fuchsia-400" : "bg-slate-700 hover:bg-slate-600"
+              className={`rounded-xl px-3 py-1.5 text-xs font-semibold transition ${
+                item.readiness === "draft_ready"
+                  ? "bg-fuchsia-500 text-white hover:bg-fuchsia-400"
+                  : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
               }`}>
               {item.readiness === "draft_ready" ? "Schedule / Publish" : "Edit Draft"}
             </button>
@@ -150,7 +153,7 @@ function QueueRow({
 
           {item.readiness === "failed" && (
             <button type="button" onClick={onRetry} disabled={isBusy}
-              className="rounded-2xl bg-fuchsia-500 px-3 py-1 text-xs font-semibold text-white transition hover:bg-fuchsia-400 disabled:opacity-50">
+              className="rounded-xl bg-fuchsia-500 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-fuchsia-400 disabled:opacity-50">
               {isBusy ? "Publishing…" : "Retry Publish"}
             </button>
           )}
@@ -158,10 +161,10 @@ function QueueRow({
           {item.readiness === "scheduled" && (
             <>
               <button type="button" onClick={onUnschedule} disabled={isBusy}
-                className="rounded-2xl bg-slate-700 px-3 py-1 text-xs font-semibold text-slate-200 transition hover:bg-slate-600 disabled:opacity-50">
+                className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50">
                 {isBusy ? "…" : "Unschedule"}
               </button>
-              <span className="text-right text-[10px] text-slate-600">Reschedule in Post Library / Upcoming Queue</span>
+              <span className="text-right text-[10px] text-slate-400">Reschedule in Post Library / Upcoming Queue</span>
             </>
           )}
         </div>
@@ -332,22 +335,22 @@ export default function ApprovalQueue() {
   }
 
   return (
-    <section className="rounded-3xl border border-white/10 bg-slate-900/70 p-6 shadow-xl shadow-slate-950/25">
+    <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h2 className="text-base font-semibold text-white">Approval Queue</h2>
-          <p className="mt-1 text-sm text-slate-400">
+          <h2 className="text-base font-semibold text-slate-900">Approval Queue</h2>
+          <p className="mt-1 text-sm text-slate-500">
             Everything awaiting action in one place — ideas, drafts, scheduled, and failed posts.
             Each action is a single explicit click; nothing publishes or schedules on its own.
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <span className="rounded-full bg-slate-800 px-3 py-1 text-xs uppercase tracking-[0.25em] text-slate-300">
+          <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-500">
             {isLoading ? "…" : `${filtered.length} items`}
           </span>
           <button type="button" onClick={fetchAll} disabled={isLoading}
-            className="rounded-3xl bg-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-200 transition hover:bg-slate-600 disabled:opacity-50">
+            className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50">
             Refresh
           </button>
         </div>
@@ -355,12 +358,12 @@ export default function ApprovalQueue() {
 
       {/* Stat pills */}
       {!isLoading && !error && (
-        <div className="mt-4 flex flex-wrap gap-2 text-xs">
-          {counts.idea_ready > 0 && <span className="rounded-full bg-sky-500/10 px-3 py-1 text-sky-300 ring-1 ring-sky-400/20">{counts.idea_ready} ideas</span>}
-          {counts.draft_incomplete > 0 && <span className="rounded-full bg-amber-500/10 px-3 py-1 text-amber-300 ring-1 ring-amber-400/20">{counts.draft_incomplete} incomplete</span>}
-          {counts.draft_ready > 0 && <span className="rounded-full bg-emerald-500/10 px-3 py-1 text-emerald-300 ring-1 ring-emerald-400/20">{counts.draft_ready} ready</span>}
-          {counts.scheduled > 0 && <span className="rounded-full bg-violet-500/10 px-3 py-1 text-violet-300 ring-1 ring-violet-400/20">{counts.scheduled} scheduled</span>}
-          {counts.failed > 0 && <span className="rounded-full bg-rose-500/10 px-3 py-1 text-rose-300 ring-1 ring-rose-400/20">{counts.failed} failed</span>}
+        <div className="mt-4 flex flex-wrap gap-2 text-xs font-medium">
+          {counts.idea_ready > 0 && <span className="rounded-full bg-sky-50 px-3 py-1 text-sky-700 ring-1 ring-sky-200">{counts.idea_ready} ideas</span>}
+          {counts.draft_incomplete > 0 && <span className="rounded-full bg-amber-50 px-3 py-1 text-amber-700 ring-1 ring-amber-200">{counts.draft_incomplete} incomplete</span>}
+          {counts.draft_ready > 0 && <span className="rounded-full bg-emerald-50 px-3 py-1 text-emerald-700 ring-1 ring-emerald-200">{counts.draft_ready} ready</span>}
+          {counts.scheduled > 0 && <span className="rounded-full bg-violet-50 px-3 py-1 text-violet-700 ring-1 ring-violet-200">{counts.scheduled} scheduled</span>}
+          {counts.failed > 0 && <span className="rounded-full bg-rose-50 px-3 py-1 text-rose-700 ring-1 ring-rose-200">{counts.failed} failed</span>}
         </div>
       )}
 
@@ -368,20 +371,20 @@ export default function ApprovalQueue() {
       <div className="mt-4 flex flex-wrap gap-2">
         {campaigns.length > 0 && (
           <select value={String(campaignFilter)} onChange={e => setCampaignFilter(e.target.value === "all" ? "all" : Number(e.target.value))}
-            className="rounded-3xl bg-slate-800 px-3 py-1.5 text-xs font-semibold text-slate-200 outline-none ring-1 ring-white/10 hover:bg-slate-700 focus:ring-fuchsia-500/40">
+            className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 outline-none transition hover:bg-slate-50 focus:ring-2 focus:ring-fuchsia-300">
             <option value="all">All campaigns</option>
             {campaigns.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
         )}
         {accounts.length > 0 && (
           <select value={String(accountFilter)} onChange={e => setAccountFilter(e.target.value === "all" ? "all" : Number(e.target.value))}
-            className="rounded-3xl bg-slate-800 px-3 py-1.5 text-xs font-semibold text-slate-200 outline-none ring-1 ring-white/10 hover:bg-slate-700 focus:ring-fuchsia-500/40">
+            className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 outline-none transition hover:bg-slate-50 focus:ring-2 focus:ring-fuchsia-300">
             <option value="all">All accounts</option>
             {accounts.map(a => <option key={a.id} value={a.id}>@{a.account_name}</option>)}
           </select>
         )}
         <select value={readinessFilter} onChange={e => setReadinessFilter(e.target.value as Readiness | "all")}
-          className="rounded-3xl bg-slate-800 px-3 py-1.5 text-xs font-semibold text-slate-200 outline-none ring-1 ring-white/10 hover:bg-slate-700 focus:ring-fuchsia-500/40">
+          className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 outline-none transition hover:bg-slate-50 focus:ring-2 focus:ring-fuchsia-300">
           <option value="all">All states</option>
           <option value="idea_ready">Idea — ready for draft</option>
           <option value="draft_incomplete">Draft — incomplete</option>
@@ -394,11 +397,11 @@ export default function ApprovalQueue() {
       {/* List */}
       <div className="mt-6 space-y-3">
         {isLoading ? (
-          [1, 2, 3].map(n => <div key={n} className="h-24 animate-pulse rounded-3xl bg-slate-800/60" />)
+          [1, 2, 3].map(n => <div key={n} className="h-24 animate-pulse rounded-2xl bg-slate-100" />)
         ) : error ? (
-          <div className="rounded-3xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-200">{error}</div>
+          <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-600">{error}</div>
         ) : filtered.length === 0 ? (
-          <p className="rounded-3xl bg-slate-950/80 px-5 py-6 text-sm text-slate-400 ring-1 ring-white/5">
+          <p className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-6 text-sm text-slate-500">
             Nothing awaiting action. Saved ideas, drafts, scheduled, and failed posts will appear here.
           </p>
         ) : (
