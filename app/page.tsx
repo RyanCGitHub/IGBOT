@@ -2,28 +2,33 @@
 
 import { useState, useEffect, useCallback } from "react";
 import type { SavedCaption } from "@/lib/supabase";
-import ContentLibrary from "@/app/components/ContentLibrary";
-import InstagramConnection from "@/app/components/InstagramConnection";
-import TestPublish from "@/app/components/TestPublish";
-import PublishHistory from "@/app/components/PublishHistory";
-import CreatePost from "@/app/components/CreatePost";
-import PostLibrary from "@/app/components/PostLibrary";
-import Campaigns from "@/app/components/Campaigns";
-import ContentPlanner from "@/app/components/ContentPlanner";
-import ContentQueue from "@/app/components/ContentQueue";
-import SchedulingAssistant from "@/app/components/SchedulingAssistant";
-import Analytics from "@/app/components/Analytics";
-import PerformanceReview from "@/app/components/PerformanceReview";
-import ApprovalQueue from "@/app/components/ApprovalQueue";
 import { apiFetch } from "@/lib/api-fetch";
 
+import DashboardShell from "@/app/components/dashboard/DashboardShell";
+import SectionCard from "@/app/components/dashboard/SectionCard";
+import AnalyticsOverview from "@/app/components/dashboard/AnalyticsOverview";
+
+import InstagramConnection from "@/app/components/InstagramConnection";
+import ApprovalQueue from "@/app/components/ApprovalQueue";
+import Campaigns from "@/app/components/Campaigns";
+import ContentPlanner from "@/app/components/ContentPlanner";
+import SchedulingAssistant from "@/app/components/SchedulingAssistant";
+import PerformanceReview from "@/app/components/PerformanceReview";
+import CreatePost from "@/app/components/CreatePost";
+import PostLibrary from "@/app/components/PostLibrary";
+import Analytics from "@/app/components/Analytics";
+
+// Legacy tools — kept, relocated behind the Advanced / Legacy Tools accordion.
+import ContentLibrary from "@/app/components/ContentLibrary";
+import TestPublish from "@/app/components/TestPublish";
+import PublishHistory from "@/app/components/PublishHistory";
+
 export default function Home() {
+  // ── Legacy caption generator (relocated to Advanced / Legacy Tools) ─────────
   const [prompt, setPrompt] = useState(
     "Write a bold caption for a new collection launch that highlights community and style."
   );
-  const [generatedCaption, setGeneratedCaption] = useState(
-    "Fresh launch energy, bold visuals, and a community-first vibe — this post is built to capture attention, drive saves, and spark conversation."
-  );
+  const [generatedCaption, setGeneratedCaption] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
 
@@ -41,9 +46,7 @@ export default function Home() {
     try {
       const res = await apiFetch("/api/captions");
       const data = await res.json();
-      if (!res.ok || data.success === false) {
-        throw new Error(data.error || "Failed to load saved captions.");
-      }
+      if (!res.ok || data.success === false) throw new Error(data.error || "Failed to load saved captions.");
       setSavedCaptions(data.captions as SavedCaption[]);
     } catch (caught) {
       setLoadError(caught instanceof Error ? caught.message : String(caught));
@@ -52,36 +55,23 @@ export default function Home() {
     }
   }, []);
 
-  useEffect(() => {
-    fetchSavedCaptions();
-  }, [fetchSavedCaptions]);
+  useEffect(() => { fetchSavedCaptions(); }, [fetchSavedCaptions]);
 
   async function handleGenerateCaption() {
     setGenerateError(null);
     setSavedSuccess(false);
     setIsGenerating(true);
-
     try {
       const response = await apiFetch("/api/generate-caption", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt }),
       });
-
       const data = await response.json();
-      if (!response.ok || data.success === false) {
-        throw new Error(data.error || "Unable to generate caption.");
-      }
-
-      setGeneratedCaption(
-        typeof data.caption === "string"
-          ? data.caption
-          : String(data.caption ?? "No caption returned.")
-      );
+      if (!response.ok || data.success === false) throw new Error(data.error || "Unable to generate caption.");
+      setGeneratedCaption(typeof data.caption === "string" ? data.caption : String(data.caption ?? "No caption returned."));
     } catch (caught) {
-      setGenerateError(
-        caught instanceof Error ? caught.message : String(caught)
-      );
+      setGenerateError(caught instanceof Error ? caught.message : String(caught));
     } finally {
       setIsGenerating(false);
     }
@@ -91,19 +81,14 @@ export default function Home() {
     setSaveError(null);
     setSavedSuccess(false);
     setIsSaving(true);
-
     try {
       const res = await apiFetch("/api/captions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt, caption: generatedCaption }),
       });
-
       const data = await res.json();
-      if (!res.ok || data.success === false) {
-        throw new Error(data.error || "Failed to save caption.");
-      }
-
+      if (!res.ok || data.success === false) throw new Error(data.error || "Failed to save caption.");
       setSavedSuccess(true);
       await fetchSavedCaptions();
     } catch (caught) {
@@ -124,271 +109,127 @@ export default function Home() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-950 text-slate-100 px-6 py-8 sm:px-10 lg:px-16">
-      <div className="mx-auto flex max-w-7xl flex-col gap-8">
-        <header className="rounded-3xl border border-white/10 bg-slate-900/80 px-8 py-8 shadow-2xl shadow-slate-950/20 backdrop-blur-xl">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <p className="text-sm uppercase tracking-[0.3em] text-fuchsia-400/90">IG-BOT</p>
-              <h1 className="mt-3 text-4xl font-semibold tracking-tight text-white sm:text-5xl">
-                Instagram Content Operating System
-              </h1>
-              <p className="mt-4 max-w-2xl text-sm leading-6 text-slate-300 sm:text-base">
-                Manage posting workflows, generate captions, review engagement metrics, and keep every Instagram account connected — all from a single dashboard.
-              </p>
+    <DashboardShell>
+      {/* 1. Connection / status */}
+      <InstagramConnection />
+
+      {/* 2. Top analytics overview — real numbers from stored data */}
+      <AnalyticsOverview />
+
+      {/* 3. Command center */}
+      <ApprovalQueue />
+
+      {/* 4. Campaigns */}
+      <Campaigns />
+
+      {/* 5. AI workflow — collapsible */}
+      <SectionCard title="Content Planner" subtitle="Generate campaign content ideas with AI" collapsible defaultOpen={false}>
+        <ContentPlanner />
+      </SectionCard>
+
+      <SectionCard title="Scheduling Assistant" subtitle="Suggest posting times and assign them to ready drafts" collapsible defaultOpen={false}>
+        <SchedulingAssistant />
+      </SectionCard>
+
+      <SectionCard title="Performance Review" subtitle="AI analysis of published performance" collapsible defaultOpen={false}>
+        <PerformanceReview />
+      </SectionCard>
+
+      {/* 6. Manual entry — collapsible */}
+      <SectionCard title="Create Post (manual)" subtitle="Upload an image and build a post by hand" collapsible defaultOpen={false}>
+        <CreatePost />
+      </SectionCard>
+
+      {/* 7. Management */}
+      <PostLibrary />
+
+      {/* 8. Analytics detail — manual per-post Sync Insights only */}
+      <Analytics />
+
+      {/* 9. Advanced / Legacy Tools */}
+      <SectionCard
+        title="Advanced / Legacy Tools"
+        subtitle="Older tools kept for reference — superseded by Content Planner and the approval flow"
+        collapsible
+        defaultOpen={false}
+      >
+        <div className="space-y-6">
+          {/* Legacy: simple caption generator (/api/generate-caption + /api/captions) */}
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+            <h3 className="text-sm font-semibold text-slate-800">Post Generator (legacy)</h3>
+            <p className="mt-0.5 text-xs text-slate-500">Quick caption generator. Prefer Content Planner for campaign-aware ideas.</p>
+            <textarea
+              value={prompt}
+              onChange={e => setPrompt(e.target.value)}
+              rows={3}
+              className="mt-3 w-full resize-none rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-fuchsia-300"
+            />
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={handleGenerateCaption}
+                disabled={isGenerating}
+                className="rounded-xl bg-fuchsia-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-fuchsia-400 disabled:opacity-50"
+              >
+                {isGenerating ? "Generating…" : "Generate Caption"}
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveCaption}
+                disabled={isSaving || !generatedCaption}
+                className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
+              >
+                {isSaving ? "Saving…" : "Save Caption"}
+              </button>
+              {savedSuccess && <span className="text-sm text-emerald-600">Saved!</span>}
             </div>
-            <div className="rounded-3xl bg-slate-800/80 px-5 py-4 text-right ring-1 ring-white/10">
-              <p className="text-xs uppercase tracking-[0.25em] text-slate-400">Active workspace</p>
-              <p className="mt-2 text-xl font-semibold text-white">IG Marketing Team</p>
-              <span className="mt-1 inline-flex rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-300 ring-1 ring-emerald-300/20">
-                Live sync enabled
-              </span>
-            </div>
-          </div>
-        </header>
-
-        <section className="grid gap-6 xl:grid-cols-[1.8fr_1.2fr]">
-          <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-1">
-            <article className="rounded-3xl border border-white/10 bg-slate-900/70 p-6 shadow-xl shadow-slate-950/25">
-              <div className="flex items-center justify-between text-sm text-slate-400">
-                <h2 className="text-base font-semibold text-white">Content Queue</h2>
-                <span className="rounded-full bg-slate-800 px-3 py-1 text-xs uppercase tracking-[0.25em] text-slate-300">
-                  12 items
-                </span>
-              </div>
-              <div className="mt-6 grid gap-4 sm:grid-cols-3">
-                <div className="rounded-3xl bg-slate-950/80 p-4 ring-1 ring-white/5">
-                  <p className="text-sm text-slate-400">Drafts</p>
-                  <p className="mt-3 text-3xl font-semibold text-white">5</p>
-                </div>
-                <div className="rounded-3xl bg-slate-950/80 p-4 ring-1 ring-white/5">
-                  <p className="text-sm text-slate-400">Scheduled</p>
-                  <p className="mt-3 text-3xl font-semibold text-white">4</p>
-                </div>
-                <div className="rounded-3xl bg-slate-950/80 p-4 ring-1 ring-white/5">
-                  <p className="text-sm text-slate-400">Posted</p>
-                  <p className="mt-3 text-3xl font-semibold text-white">3</p>
-                </div>
-              </div>
-            </article>
-
-            <article className="rounded-3xl border border-white/10 bg-slate-900/70 p-6 shadow-xl shadow-slate-950/25">
-              <div className="flex items-center justify-between text-sm text-slate-400">
-                <h2 className="text-base font-semibold text-white">Post Generator</h2>
-                <span className="rounded-full bg-slate-800 px-3 py-1 text-xs uppercase tracking-[0.25em] text-slate-300">
-                  AI-assisted
-                </span>
-              </div>
-              <div className="mt-6 space-y-4">
-                <label className="block text-sm font-medium text-slate-300">Caption prompt</label>
-                <div className="rounded-3xl border border-slate-800 bg-slate-950/80 p-4">
-                  <textarea
-                    value={prompt}
-                    onChange={(event) => setPrompt(event.target.value)}
-                    className="min-h-[120px] w-full resize-none bg-transparent text-sm leading-6 text-slate-100 outline-none ring-0"
-                  />
-                </div>
-                <button
-                  type="button"
-                  onClick={handleGenerateCaption}
-                  disabled={isGenerating}
-                  className="inline-flex items-center justify-center rounded-3xl bg-fuchsia-500 px-5 py-3 text-sm font-semibold text-white transition hover:bg-fuchsia-400 disabled:cursor-not-allowed disabled:bg-slate-600"
-                >
-                  {isGenerating ? "Generating…" : "Generate Caption"}
-                </button>
-                {generateError ? (
-                  <div className="rounded-3xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-200">
-                    {generateError}
-                  </div>
-                ) : null}
-                <div className="rounded-3xl bg-slate-950/80 p-4 ring-1 ring-white/5">
-                  <p className="text-sm uppercase tracking-[0.2em] text-slate-400">Generated caption</p>
-                  <p className="mt-3 text-sm leading-7 text-slate-200">{generatedCaption}</p>
-                </div>
-                <div className="flex items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={handleSaveCaption}
-                    disabled={isSaving || !generatedCaption}
-                    className="inline-flex items-center justify-center rounded-3xl bg-slate-700 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-600 disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500"
-                  >
-                    {isSaving ? "Saving…" : "Save Caption"}
-                  </button>
-                  {savedSuccess ? (
-                    <span className="text-sm text-emerald-400">Saved!</span>
-                  ) : null}
-                </div>
-                {saveError ? (
-                  <div className="rounded-3xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-200">
-                    {saveError}
-                  </div>
-                ) : null}
-              </div>
-            </article>
-          </div>
-
-          <div className="grid gap-6">
-            <article className="rounded-3xl border border-white/10 bg-slate-900/70 p-6 shadow-xl shadow-slate-950/25">
-              <div className="flex items-center justify-between text-sm text-slate-400">
-                <h2 className="text-base font-semibold text-white">Analytics</h2>
-                <span className="rounded-full bg-slate-800 px-3 py-1 text-xs uppercase tracking-[0.25em] text-slate-300">
-                  Last 7 days
-                </span>
-              </div>
-              <div className="mt-6 grid gap-4 sm:grid-cols-2">
-                <div className="rounded-3xl bg-slate-950/80 p-5 ring-1 ring-white/5">
-                  <p className="text-sm text-slate-400">Followers</p>
-                  <p className="mt-3 text-3xl font-semibold text-white">28.4K</p>
-                </div>
-                <div className="rounded-3xl bg-slate-950/80 p-5 ring-1 ring-white/5">
-                  <p className="text-sm text-slate-400">Engagement Rate</p>
-                  <p className="mt-3 text-3xl font-semibold text-white">6.8%</p>
-                </div>
-                <div className="rounded-3xl bg-slate-950/80 p-5 ring-1 ring-white/5">
-                  <p className="text-sm text-slate-400">Likes</p>
-                  <p className="mt-3 text-3xl font-semibold text-white">14.2K</p>
-                </div>
-                <div className="rounded-3xl bg-slate-950/80 p-5 ring-1 ring-white/5">
-                  <p className="text-sm text-slate-400">Comments</p>
-                  <p className="mt-3 text-3xl font-semibold text-white">1.1K</p>
-                </div>
-              </div>
-            </article>
-
-            <article className="rounded-3xl border border-white/10 bg-slate-900/70 p-6 shadow-xl shadow-slate-950/25">
-              <div className="flex items-center justify-between text-sm text-slate-400">
-                <h2 className="text-base font-semibold text-white">Account Status</h2>
-                <span className="rounded-full bg-slate-800 px-3 py-1 text-xs uppercase tracking-[0.25em] text-slate-300">
-                  System health
-                </span>
-              </div>
-              <div className="mt-6 space-y-4">
-                {[
-                  { label: "Instagram Connected", status: "Active", badgeClass: "text-emerald-300 bg-emerald-500/10 ring-emerald-300/20" },
-                  { label: "Database Connected", status: "Healthy", badgeClass: "text-emerald-300 bg-emerald-500/10 ring-emerald-300/20" },
-                  { label: "Claude API Connected", status: "Ready", badgeClass: "text-emerald-300 bg-emerald-500/10 ring-emerald-300/20" },
-                ].map((item) => (
-                  <div key={item.label} className="flex items-center justify-between rounded-3xl bg-slate-950/80 px-5 py-4 ring-1 ring-white/5">
-                    <p className="text-sm text-slate-300">{item.label}</p>
-                    <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] ring-1 ${item.badgeClass}`}>
-                      {item.status}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </article>
-          </div>
-        </section>
-
-        <section className="rounded-3xl border border-white/10 bg-slate-900/70 p-6 shadow-xl shadow-slate-950/25">
-          <div className="flex items-center justify-between text-slate-300">
-            <div>
-              <h2 className="text-base font-semibold text-white">Saved Captions</h2>
-              <p className="mt-1 text-sm text-slate-400">Recently saved captions from the generator.</p>
-            </div>
-            <span className="rounded-full bg-slate-800 px-3 py-1 text-xs uppercase tracking-[0.25em] text-slate-300">
-              {isLoadingCaptions ? "…" : `${savedCaptions.length} saved`}
-            </span>
-          </div>
-
-          <div className="mt-6">
-            {isLoadingCaptions ? (
-              <div className="space-y-3">
-                {[1, 2, 3].map((n) => (
-                  <div key={n} className="h-20 animate-pulse rounded-3xl bg-slate-800/60" />
-                ))}
-              </div>
-            ) : loadError ? (
-              <div className="rounded-3xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-200">
-                {loadError}
-              </div>
-            ) : savedCaptions.length === 0 ? (
-              <p className="rounded-3xl bg-slate-950/80 px-5 py-6 text-sm text-slate-400 ring-1 ring-white/5">
-                No saved captions yet. Generate a caption and click Save Caption.
-              </p>
-            ) : (
-              <div className="space-y-4">
-                {savedCaptions.map((item) => (
-                  <div key={item.id} className="rounded-3xl bg-slate-950/80 px-5 py-4 ring-1 ring-white/5">
-                    <div className="flex items-center justify-between gap-4 text-sm text-slate-400">
-                      <p className="truncate text-xs text-slate-500">{item.prompt}</p>
-                      <span className="shrink-0 rounded-full bg-slate-800 px-3 py-1 text-[11px] uppercase tracking-[0.2em] text-slate-300">
-                        {formatRelativeTime(item.created_at)}
-                      </span>
-                    </div>
-                    <p className="mt-3 text-sm leading-6 text-slate-200">{item.caption}</p>
-                  </div>
-                ))}
+            {generateError && <p className="mt-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-600">{generateError}</p>}
+            {saveError && <p className="mt-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-600">{saveError}</p>}
+            {generatedCaption && (
+              <div className="mt-3 rounded-xl border border-slate-200 bg-white p-3">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Generated caption</p>
+                <p className="mt-1 text-sm leading-6 text-slate-700">{generatedCaption}</p>
               </div>
             )}
           </div>
-        </section>
 
-        <InstagramConnection />
-
-        <ApprovalQueue />
-
-        <Campaigns />
-
-        <ContentPlanner />
-
-        <CreatePost />
-
-        <ContentQueue />
-
-        <SchedulingAssistant />
-
-        <PostLibrary />
-
-        <Analytics />
-
-        <PerformanceReview />
-
-        <section className="rounded-3xl border border-white/5 bg-slate-900/40 p-6">
-          <details>
-            <summary className="cursor-pointer text-sm font-semibold text-slate-500 hover:text-slate-300">
-              Developer Tools (TestPublish + Publish History)
-            </summary>
-            <div className="mt-6 space-y-6">
-              <TestPublish />
-              <PublishHistory />
+          {/* Legacy: saved captions list */}
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-slate-800">Saved Captions (legacy)</h3>
+              <span className="rounded-full border border-slate-200 bg-white px-2.5 py-0.5 text-xs text-slate-500">
+                {isLoadingCaptions ? "…" : `${savedCaptions.length} saved`}
+              </span>
             </div>
-          </details>
-        </section>
-
-        <ContentLibrary />
-
-        <section className="rounded-3xl border border-white/10 bg-slate-900/70 p-6 shadow-xl shadow-slate-950/25">
-          <div className="flex items-center justify-between text-slate-300">
-            <div>
-              <h2 className="text-base font-semibold text-white">Recent Activity</h2>
-              <p className="mt-1 text-sm text-slate-400">Latest account actions and workflow updates.</p>
-            </div>
-            <span className="rounded-full bg-slate-800 px-3 py-1 text-xs uppercase tracking-[0.25em] text-slate-300">
-              24 items
-            </span>
-          </div>
-          <div className="mt-6 space-y-4">
-            {[
-              { time: "2m ago", action: "Caption generated for @brandlaunch", detail: "AI caption ready for approval." },
-              { time: "18m ago", action: "New post scheduled", detail: "Product highlight post set for Friday at 10am." },
-              { time: "45m ago", action: "Database sync completed", detail: "Subscriber tags updated for campaign launch." },
-              { time: "1h ago", action: "Engagement report exported", detail: "Top-performing reel metrics added to analytics." },
-            ].map((event) => (
-              <div key={`${event.time}-${event.action}`} className="rounded-3xl bg-slate-950/80 px-5 py-4 ring-1 ring-white/5 transition hover:bg-slate-900/90">
-                <div className="flex items-center justify-between gap-4 text-sm text-slate-400">
-                  <p>{event.time}</p>
-                  <span className="rounded-full bg-slate-800 px-3 py-1 text-[11px] uppercase tracking-[0.2em] text-slate-300">
-                    Activity
-                  </span>
+            <div className="mt-3">
+              {isLoadingCaptions ? (
+                <div className="h-16 animate-pulse rounded-xl bg-slate-200/60" />
+              ) : loadError ? (
+                <p className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-600">{loadError}</p>
+              ) : savedCaptions.length === 0 ? (
+                <p className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-500">No saved captions yet.</p>
+              ) : (
+                <div className="space-y-2">
+                  {savedCaptions.map(item => (
+                    <div key={item.id} className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="truncate text-xs text-slate-400">{item.prompt}</p>
+                        <span className="shrink-0 text-[11px] text-slate-400">{formatRelativeTime(item.created_at)}</span>
+                      </div>
+                      <p className="mt-1.5 text-sm leading-6 text-slate-700">{item.caption}</p>
+                    </div>
+                  ))}
                 </div>
-                <p className="mt-3 font-semibold text-white">{event.action}</p>
-                <p className="mt-2 text-sm leading-6 text-slate-400">{event.detail}</p>
-              </div>
-            ))}
+              )}
+            </div>
           </div>
-        </section>
-      </div>
-    </main>
+
+          {/* Legacy dev tools + content library (unchanged components) */}
+          <TestPublish />
+          <PublishHistory />
+          <ContentLibrary />
+        </div>
+      </SectionCard>
+    </DashboardShell>
   );
 }
