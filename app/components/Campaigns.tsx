@@ -47,24 +47,24 @@ function CampaignForm({
   const canSubmit = values.name.trim().length > 0 && !isBusy;
 
   return (
-    <div className="space-y-3 rounded-3xl border border-fuchsia-500/20 bg-slate-950/60 p-4">
+    <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="flex flex-col gap-1">
-          <label className="text-xs font-medium text-slate-400">Name *</label>
+          <label className="text-xs font-medium text-slate-500">Name *</label>
           <input
             type="text"
             value={values.name}
             onChange={e => setValues(v => ({ ...v, name: e.target.value }))}
             placeholder="Summer Launch"
-            className="rounded-2xl bg-slate-800/80 px-4 py-2.5 text-sm text-slate-100 outline-none ring-1 ring-white/10 focus:ring-fuchsia-500/40"
+            className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-fuchsia-300"
           />
         </div>
         <div className="flex flex-col gap-1">
-          <label className="text-xs font-medium text-slate-400">Target account (optional)</label>
+          <label className="text-xs font-medium text-slate-500">Target account (optional)</label>
           <select
             value={values.account_id ?? ""}
             onChange={e => setValues(v => ({ ...v, account_id: e.target.value ? Number(e.target.value) : null }))}
-            className="rounded-2xl bg-slate-800/80 px-4 py-2.5 text-sm text-slate-100 outline-none ring-1 ring-white/10 focus:ring-fuchsia-500/40"
+            className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-fuchsia-300"
           >
             <option value="">No specific account</option>
             {accounts.map(a => (
@@ -74,23 +74,23 @@ function CampaignForm({
         </div>
       </div>
       <div className="flex flex-col gap-1">
-        <label className="text-xs font-medium text-slate-400">Description / theme (optional)</label>
+        <label className="text-xs font-medium text-slate-500">Description / theme (optional)</label>
         <textarea
           value={values.description}
           onChange={e => setValues(v => ({ ...v, description: e.target.value }))}
           rows={2}
           placeholder="Bold product highlights, community-first tone…"
-          className="resize-none rounded-2xl bg-slate-800/80 px-4 py-2.5 text-sm text-slate-100 outline-none ring-1 ring-white/10 focus:ring-fuchsia-500/40"
+          className="resize-none rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-fuchsia-300"
         />
       </div>
       <div className="flex flex-col gap-1">
-        <label className="text-xs font-medium text-slate-400">Content style / niche (optional)</label>
+        <label className="text-xs font-medium text-slate-500">Content style / niche (optional)</label>
         <input
           type="text"
           value={values.content_style}
           onChange={e => setValues(v => ({ ...v, content_style: e.target.value }))}
           placeholder="Streetwear · motivational · UGC"
-          className="rounded-2xl bg-slate-800/80 px-4 py-2.5 text-sm text-slate-100 outline-none ring-1 ring-white/10 focus:ring-fuchsia-500/40"
+          className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-fuchsia-300"
         />
       </div>
       <div className="flex gap-2">
@@ -98,7 +98,7 @@ function CampaignForm({
           type="button"
           onClick={() => onSubmit(values)}
           disabled={!canSubmit}
-          className="rounded-3xl bg-fuchsia-500 px-5 py-2 text-sm font-semibold text-white transition hover:bg-fuchsia-400 disabled:cursor-not-allowed disabled:opacity-40"
+          className="rounded-xl bg-fuchsia-500 px-5 py-2 text-sm font-semibold text-white transition hover:bg-fuchsia-400 disabled:cursor-not-allowed disabled:opacity-40"
         >
           {isBusy ? "Saving…" : submitLabel}
         </button>
@@ -107,7 +107,7 @@ function CampaignForm({
             type="button"
             onClick={onCancel}
             disabled={isBusy}
-            className="rounded-3xl bg-slate-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-600 disabled:opacity-40"
+            className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-40"
           >
             Cancel
           </button>
@@ -223,24 +223,24 @@ export default function Campaigns() {
   }
 
   return (
-    <section className="rounded-3xl border border-white/10 bg-slate-900/70 p-6 shadow-xl shadow-slate-950/25">
+    <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h2 className="text-base font-semibold text-white">Campaigns</h2>
-          <p className="mt-1 text-sm text-slate-400">
+          <h2 className="text-base font-semibold text-slate-900">Campaigns</h2>
+          <p className="mt-1 text-sm text-slate-500">
             Group posts into campaigns. Optional — posts work fine without one. Deleting a
             campaign never deletes posts; they just become unassigned.
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <span className="rounded-full bg-slate-800 px-3 py-1 text-xs uppercase tracking-[0.25em] text-slate-300">
+          <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-500">
             {isLoading ? "…" : `${campaigns.length}`}
           </span>
           <button
             type="button"
             onClick={() => setShowCreate(s => !s)}
-            className="rounded-3xl bg-fuchsia-500 px-4 py-1.5 text-xs font-semibold text-white transition hover:bg-fuchsia-400"
+            className="rounded-xl bg-fuchsia-500 px-4 py-1.5 text-xs font-semibold text-white transition hover:bg-fuchsia-400"
           >
             {showCreate ? "Close" : "New Campaign"}
           </button>
@@ -264,16 +264,16 @@ export default function Campaigns() {
       {/* List */}
       <div className="mt-6 space-y-3">
         {isLoading ? (
-          [1, 2].map(n => <div key={n} className="h-20 animate-pulse rounded-3xl bg-slate-800/60" />)
+          [1, 2].map(n => <div key={n} className="h-20 animate-pulse rounded-2xl bg-slate-100" />)
         ) : error ? (
-          <div className="rounded-3xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-200">{error}</div>
+          <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-600">{error}</div>
         ) : campaigns.length === 0 ? (
-          <p className="rounded-3xl bg-slate-950/80 px-5 py-6 text-sm text-slate-400 ring-1 ring-white/5">
+          <p className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-6 text-sm text-slate-500">
             No campaigns yet. Click New Campaign to create one.
           </p>
         ) : (
           campaigns.map(c => (
-            <div key={c.id} className="rounded-3xl bg-slate-950/80 p-4 ring-1 ring-white/5">
+            <div key={c.id} className="rounded-2xl border border-slate-200 bg-white p-4 transition hover:shadow-sm">
               {editingId === c.id ? (
                 <CampaignForm
                   initial={{
@@ -292,28 +292,28 @@ export default function Campaigns() {
                 <div className="flex items-start justify-between gap-4">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
-                      <p className="text-sm font-semibold text-white">{c.name}</p>
+                      <p className="text-sm font-semibold text-slate-900">{c.name}</p>
                       {accountName(c.account_id) && (
-                        <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[10px] text-slate-300 ring-1 ring-white/10">
+                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] text-slate-600 ring-1 ring-slate-200">
                           @{accountName(c.account_id)}
                         </span>
                       )}
                       {c.content_style && (
-                        <span className="rounded-full bg-fuchsia-500/10 px-2 py-0.5 text-[10px] text-fuchsia-300 ring-1 ring-fuchsia-400/20">
+                        <span className="rounded-full bg-fuchsia-50 px-2 py-0.5 text-[10px] text-fuchsia-700 ring-1 ring-fuchsia-200">
                           {c.content_style}
                         </span>
                       )}
                     </div>
                     {c.description && (
-                      <p className="mt-1.5 line-clamp-2 text-sm text-slate-300">{c.description}</p>
+                      <p className="mt-1.5 line-clamp-2 text-sm text-slate-600">{c.description}</p>
                     )}
-                    <p className="mt-1 text-xs text-slate-600">Created {formatRelative(c.created_at)}</p>
+                    <p className="mt-1 text-xs text-slate-400">Created {formatRelative(c.created_at)}</p>
                   </div>
                   <div className="flex shrink-0 flex-col gap-1.5">
                     <button
                       type="button"
                       onClick={() => setEditingId(c.id)}
-                      className="rounded-2xl bg-slate-800 px-3 py-1 text-xs text-slate-300 hover:bg-slate-700"
+                      className="rounded-lg border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
                     >
                       Edit
                     </button>
@@ -321,7 +321,7 @@ export default function Campaigns() {
                       type="button"
                       onClick={() => handleDelete(c.id, c.name)}
                       disabled={deletingId === c.id}
-                      className="rounded-2xl bg-slate-800 px-3 py-1 text-xs text-rose-500/70 hover:bg-rose-500/20 disabled:opacity-40"
+                      className="rounded-lg border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-rose-500 transition hover:bg-rose-50 disabled:opacity-40"
                     >
                       {deletingId === c.id ? "…" : "Delete"}
                     </button>
