@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { apiFetch } from "@/lib/api-fetch";
-import type { IgPost, ConnectedAccount, Campaign } from "@/lib/supabase";
+import type { IgPost, ConnectedAccount, Campaign, Persona } from "@/lib/supabase";
 
 // Full draft completion editor: caption, image, account, campaign, then
 // Save / Publish Now / Schedule. All actions update the EXISTING draft row
@@ -36,10 +36,25 @@ export default function DraftEditor({
   const [scheduleInput, setScheduleInput] = useState("");
   const [scheduleTz] = useState(() => Intl.DateTimeFormat().resolvedOptions().timeZone);
 
+  // AI image generation
+  const [personas, setPersonas] = useState<Persona[]>([]);
+  const [showImageGen, setShowImageGen] = useState(false);
+  const [imagePrompt, setImagePrompt] = useState("");
+  const [isGeneratingImage, setIsGeneratingImage] = useState(false);
+  const [genPromptUsed, setGenPromptUsed] = useState<string | null>(null);
+
+  useEffect(() => {
+    apiFetch("/api/personas")
+      .then(r => r.json())
+      .then(d => { if (d.success) setPersonas(d.personas as Persona[]); })
+      .catch(() => {});
+  }, []);
+
   const hasImage = !!imageUrl;
   const hasAccount = accountId != null;
-  const isWorking = isUploading || busy != null;
+  const isWorking = isUploading || isGeneratingImage || busy != null;
   const canPublishOrSchedule = hasImage && hasAccount && !isWorking;
+  const selectedPersona: Persona | null = personas.find(p => p.account_id === accountId) ?? null;
 
   async function handleUpload(file: File) {
     setIsUploading(true);
@@ -57,6 +72,33 @@ export default function DraftEditor({
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setIsUploading(false);
+    }
+  }
+
+  // Generate an AI image and attach it exactly like an upload (same image state
+  // that persist() saves into image_url / image_storage_path / normalization_meta).
+  async function handleGenerateImage() {
+    if (accountId == null) { setError("Select an Instagram account first."); return; }
+    if (!imagePrompt.trim() || isGeneratingImage) return;
+    setIsGeneratingImage(true);
+    setError(null);
+    try {
+      const res = await apiFetch("/api/media/generate-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ account_id: accountId, draft_id: post.id, prompt: imagePrompt.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error ?? "Image generation failed.");
+      setImageUrl(data.imageUrl as string);
+      setImagePath(data.path as string);
+      setNormalization((data.normalization as Record<string, unknown>) ?? null);
+      setGenPromptUsed(data.promptUsed ?? null);
+      setShowImageGen(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setIsGeneratingImage(false);
     }
   }
 
@@ -194,6 +236,55 @@ export default function DraftEditor({
           className="hidden"
           onChange={e => { const f = e.target.files?.[0]; if (f) handleUpload(f); e.target.value = ""; }}
         />
+
+        {/* Generate image with AI */}
+        <div className="mt-2">
+          <button
+            type="button"
+            onClick={() => { setShowImageGen(s => !s); setError(null); }}
+            disabled={isWorking || accountId == null}
+            title={accountId == null ? "Select an account first" : ""}
+            className="rounded-2xl border border-fuchsia-500/40 bg-fuchsia-500/10 px-3 py-1.5 text-xs font-semibold text-fuchsia-300 transition hover:bg-fuchsia-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {showImageGen ? "Cancel AI image" : imageUrl ? "✨ Replace with AI image" : "✨ Generate image with AI"}
+          </button>
+
+          {showImageGen && (
+            <div className="mt-2 space-y-2 rounded-2xl border border-fuchsia-500/20 bg-slate-900/60 p-3">
+              {selectedPersona?.visual_style ? (
+                <div className="rounded-xl bg-slate-950/60 p-2">
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-fuchsia-400">Persona visual style (always applied)</p>
+                  <p className="mt-1 line-clamp-3 text-[11px] text-slate-400">{selectedPersona.visual_style}</p>
+                </div>
+              ) : (
+                <p className="text-[11px] text-slate-500">This account has no persona visual style — the image uses only your prompt.</p>
+              )}
+              <textarea
+                value={imagePrompt}
+                onChange={e => setImagePrompt(e.target.value)}
+                rows={3}
+                disabled={isGeneratingImage}
+                placeholder="Describe the image to generate (scene / subject)…"
+                className="w-full resize-none rounded-xl bg-slate-800/80 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 outline-none ring-1 ring-white/10 focus:ring-fuchsia-500/40 disabled:opacity-50"
+              />
+              <button
+                type="button"
+                onClick={handleGenerateImage}
+                disabled={isGeneratingImage || !imagePrompt.trim()}
+                className="rounded-2xl bg-fuchsia-500 px-4 py-1.5 text-xs font-semibold text-white transition hover:bg-fuchsia-400 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {isGeneratingImage ? "Generating…" : "Generate Image"}
+              </button>
+              <p className="text-[10px] text-slate-600">The persona&apos;s visual style is prepended automatically; the result attaches as this draft&apos;s image.</p>
+            </div>
+          )}
+
+          {genPromptUsed && !showImageGen && (
+            <p className="mt-1 text-[10px] text-slate-600">
+              Generated from prompt: {genPromptUsed.length > 140 ? genPromptUsed.slice(0, 140) + "…" : genPromptUsed}
+            </p>
+          )}
+        </div>
       </div>
 
       {/* Caption */}
