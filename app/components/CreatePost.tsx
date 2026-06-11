@@ -3,7 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { apiFetch } from "@/lib/api-fetch";
 import type { ImageAnalysis } from "@/app/api/instagram/analyze/route";
-import type { CaptionOption, ConnectedAccount, IgPost, Campaign } from "@/lib/supabase";
+import type { CaptionOption, ConnectedAccount, IgPost, Campaign, Persona } from "@/lib/supabase";
 import type { NormalizationMeta } from "@/lib/image-normalize";
 
 // ─── Local types ──────────────────────────────────────────────────────────────
@@ -220,6 +220,14 @@ export default function CreatePost() {
   const [campaigns, setCampaigns]         = useState<Campaign[]>([]);
   const [selectedCampaignId, setSelectedCampaignId] = useState<number | null>(null);
 
+  // AI image generation
+  const [personas, setPersonas]           = useState<Persona[]>([]);
+  const [showImageGen, setShowImageGen]   = useState(false);
+  const [imagePrompt, setImagePrompt]     = useState("");
+  const [isGeneratingImage, setIsGeneratingImage] = useState(false);
+  const [imageGenError, setImageGenError] = useState<string | null>(null);
+  const [generatedPromptUsed, setGeneratedPromptUsed] = useState<string | null>(null);
+
   // Save / publish
   const [actionPhase, setActionPhase]         = useState<ActionPhase>("idle");
   const [actionError, setActionError]         = useState<string | null>(null);
@@ -260,6 +268,14 @@ export default function CreatePost() {
       .catch(() => {});
   }, []);
 
+  // Load personas on mount (drives the AI image prompt's visual style)
+  useEffect(() => {
+    apiFetch("/api/personas")
+      .then(r => r.json())
+      .then(d => { if (d.success) setPersonas(d.personas as Persona[]); })
+      .catch(() => {});
+  }, []);
+
   const handleFileChange = useCallback((f: File | null) => {
     if (localPreview) URL.revokeObjectURL(localPreview);
     setAnalysis(null);
@@ -279,6 +295,10 @@ export default function CreatePost() {
     setScheduleInput("");
     setScheduleError(null);
     setPendingAction(null);
+    setShowImageGen(false);
+    setImagePrompt("");
+    setImageGenError(null);
+    setGeneratedPromptUsed(null);
     isSubmittingRef.current = false;
 
     if (!f) { setFile(null); setLocalPreview(null); return; }
@@ -287,13 +307,29 @@ export default function CreatePost() {
   }, [localPreview]);
 
   async function handleAnalyze() {
-    if (!file) return;
+    if (!file && !uploadResult) return;
     setIsAnalyzing(true);
     setAnalyzeError(null);
 
     try {
+      // Resolve the image to analyze: a picked file, or the AI-generated image
+      // fetched from its stored URL and wrapped as a File for the same multipart flow.
+      let imageFile: File;
+      if (file) {
+        imageFile = file;
+      } else {
+        try {
+          const resp = await fetch(uploadResult!.imageUrl);
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          const blob = await resp.blob();
+          imageFile = new File([blob], "generated.jpg", { type: blob.type || "image/jpeg" });
+        } catch {
+          throw new Error("Could not load generated image for caption analysis.");
+        }
+      }
+
       const fd = new FormData();
-      fd.append("file", file);
+      fd.append("file", imageFile);
       // Persona-aware captions: tell analyze which account this is for.
       if (selectedAccountId != null) fd.append("account_id", String(selectedAccountId));
       const res = await apiFetch("/api/instagram/analyze", { method: "POST", body: fd });
@@ -336,16 +372,64 @@ export default function CreatePost() {
     return result;
   }
 
+  // Resolve the image for a save/publish/schedule action:
+  // - a picked file → upload it (existing path)
+  // - otherwise an AI-generated image already normalized + stored → reuse it
+  async function resolveImage(): Promise<UploadResult | null> {
+    if (file) return await uploadImage();
+    return uploadResult;
+  }
+
+  function clearGeneratedImage() {
+    setUploadResult(null);
+    setGeneratedPromptUsed(null);
+  }
+
+  const selectedPersona: Persona | null =
+    personas.find(p => p.account_id === selectedAccountId) ?? null;
+
+  async function handleGenerateImage() {
+    if (selectedAccountId == null) { setImageGenError("Select an Instagram account first."); return; }
+    if (!imagePrompt.trim() || isGeneratingImage) return;
+    setIsGeneratingImage(true);
+    setImageGenError(null);
+    try {
+      const res = await apiFetch("/api/media/generate-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ account_id: selectedAccountId, prompt: imagePrompt.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error ?? "Image generation failed.");
+
+      // Attach exactly like an uploaded image: drop any picked file and store the
+      // generated image in uploadResult (same { imageUrl, path, normalization } shape).
+      if (localPreview) URL.revokeObjectURL(localPreview);
+      setFile(null);
+      setLocalPreview(null);
+      setAnalysis(null);
+      setCaptionOptions(null);
+      setSelectedIdx(null);
+      setUploadResult({ imageUrl: data.imageUrl, path: data.path, normalization: data.normalization });
+      setGeneratedPromptUsed(data.promptUsed ?? null);
+      setShowImageGen(false);
+    } catch (e) {
+      setImageGenError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setIsGeneratingImage(false);
+    }
+  }
+
   async function handleSaveDraft() {
-    if (!file || !caption.trim() || isSubmittingRef.current) return;
+    if ((!file && !uploadResult) || !caption.trim() || isSubmittingRef.current) return;
     isSubmittingRef.current = true;
     setPendingAction("draft");
     setActionPhase("uploading");
     setActionError(null);
 
     try {
-      const uploaded = await uploadImage();
-      if (!uploaded) throw new Error("Upload returned no data.");
+      const uploaded = await resolveImage();
+      if (!uploaded) throw new Error("No image available.");
 
       setActionPhase("saving");
       const res = await apiFetch("/api/ig-posts", {
@@ -378,7 +462,7 @@ export default function CreatePost() {
   }
 
   async function handlePublishNow() {
-    if (!file || !caption.trim() || isSubmittingRef.current) return;
+    if ((!file && !uploadResult) || !caption.trim() || isSubmittingRef.current) return;
     if (selectedAccountId == null) return; // guarded by disabled button; defensive
     isSubmittingRef.current = true;
     setPendingAction("publish");
@@ -386,8 +470,8 @@ export default function CreatePost() {
     setActionError(null);
 
     try {
-      const uploaded = await uploadImage();
-      if (!uploaded) throw new Error("Upload returned no data.");
+      const uploaded = await resolveImage();
+      if (!uploaded) throw new Error("No image available.");
 
       setActionPhase("saving");
       const createRes = await apiFetch("/api/ig-posts", {
@@ -433,7 +517,7 @@ export default function CreatePost() {
   }
 
   async function handleSchedule() {
-    if (!file || !caption.trim() || !scheduleInput || isSubmittingRef.current) return;
+    if ((!file && !uploadResult) || !caption.trim() || !scheduleInput || isSubmittingRef.current) return;
     if (selectedAccountId == null) return; // guarded by disabled button; defensive
 
     const scheduledDate = new Date(scheduleInput);
@@ -452,8 +536,8 @@ export default function CreatePost() {
     setActionError(null);
 
     try {
-      const uploaded = await uploadImage();
-      if (!uploaded) throw new Error("Upload returned no data.");
+      const uploaded = await resolveImage();
+      if (!uploaded) throw new Error("No image available.");
 
       setActionPhase("scheduling");
       const res = await apiFetch("/api/ig-posts", {
@@ -494,8 +578,9 @@ export default function CreatePost() {
 
   const isWorking  = ["uploading", "saving", "publishing", "scheduling"].includes(actionPhase);
   const isDone     = actionPhase === "done_draft" || actionPhase === "done_published" || actionPhase === "done_scheduled";
-  const canAnalyze = !!file && !isAnalyzing && !isWorking && !isDone;
-  const canSave    = !!file && !!caption.trim() && !isWorking && !isDone;
+  const hasImage   = !!file || !!uploadResult; // picked file OR an AI-generated image
+  const canAnalyze = hasImage && !isAnalyzing && !isWorking && !isDone; // file or generated image
+  const canSave    = hasImage && !!caption.trim() && !isWorking && !isDone;
   // Publishing and scheduling require a concrete account; drafts may be saved without one.
   const hasAccount = selectedAccountId != null;
   const canPublishOrSchedule = canSave && hasAccount;
@@ -533,19 +618,19 @@ export default function CreatePost() {
           Image <span className="text-slate-500">(JPG · JPEG · PNG · max 8 MB)</span>
         </p>
 
-        {localPreview && file ? (
+        {(localPreview && file) || (uploadResult && !file) ? (
           <div className="space-y-2">
             <div className="relative">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
-                src={localPreview}
+                src={file ? localPreview! : uploadResult!.imageUrl}
                 alt="Preview"
                 className="h-52 w-full rounded-2xl object-cover ring-1 ring-white/10"
               />
               {!isWorking && !isDone && (
                 <button
                   type="button"
-                  onClick={() => handleFileChange(null)}
+                  onClick={() => (file ? handleFileChange(null) : clearGeneratedImage())}
                   className="absolute right-2 top-2 rounded-full bg-slate-900/80 px-2 py-1 text-xs text-slate-300 ring-1 ring-white/10 hover:bg-rose-600 hover:text-white"
                 >
                   Remove
@@ -554,6 +639,11 @@ export default function CreatePost() {
               {analysis && (
                 <span className="absolute bottom-2 left-2 rounded-full bg-emerald-900/80 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-300 ring-1 ring-emerald-400/20">
                   ✓ AI analyzed
+                </span>
+              )}
+              {!file && uploadResult && (
+                <span className="absolute bottom-2 left-2 rounded-full bg-fuchsia-900/80 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-fuchsia-200 ring-1 ring-fuchsia-400/20">
+                  ✨ AI-generated
                 </span>
               )}
               {isWorking && (
@@ -566,7 +656,7 @@ export default function CreatePost() {
               )}
             </div>
             <p className="font-mono text-xs text-slate-500">
-              {file.name} · {shortType(file.type)} · {formatBytes(file.size)}
+              {file ? `${file.name} · ${shortType(file.type)} · ${formatBytes(file.size)}` : "AI-generated image"}
             </p>
           </div>
         ) : (
@@ -591,6 +681,77 @@ export default function CreatePost() {
           className="hidden"
           onChange={e => handleFileChange(e.target.files?.[0] ?? null)}
         />
+
+        {/* ── Generate image with AI ──────────────────────────────────────────── */}
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => { setShowImageGen(s => !s); setImageGenError(null); }}
+            disabled={isWorking || isDone || selectedAccountId == null}
+            title={selectedAccountId == null ? "Select an Instagram account first" : ""}
+            className="rounded-3xl border border-fuchsia-500/40 bg-fuchsia-500/10 px-4 py-2 text-sm font-semibold text-fuchsia-300 transition hover:bg-fuchsia-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {showImageGen ? "Cancel AI image" : "✨ Generate image with AI"}
+          </button>
+          {/* Video: disabled stub (MEDIA_VIDEO_ENABLED is off) */}
+          <button
+            type="button"
+            disabled
+            title="Video generation is coming soon"
+            className="cursor-not-allowed rounded-3xl border border-slate-700 bg-slate-800/60 px-4 py-2 text-sm font-semibold text-slate-500"
+          >
+            Generate Video (coming soon)
+          </button>
+        </div>
+
+        {showImageGen && !isWorking && !isDone && (
+          <div className="mt-3 space-y-3 rounded-3xl border border-fuchsia-500/20 bg-slate-950/60 p-4">
+            {selectedPersona?.visual_style ? (
+              <div className="rounded-2xl bg-slate-900/60 p-3">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-fuchsia-400">Persona visual style (always applied)</p>
+                <p className="mt-1 line-clamp-3 text-xs text-slate-400">{selectedPersona.visual_style}</p>
+              </div>
+            ) : (
+              <p className="text-xs text-slate-500">
+                This account has no persona visual style — the image uses only your prompt below.
+              </p>
+            )}
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-slate-400">Image prompt (the scene / subject to generate)</label>
+              <textarea
+                value={imagePrompt}
+                onChange={e => { setImagePrompt(e.target.value); setImageGenError(null); }}
+                rows={3}
+                disabled={isGeneratingImage}
+                placeholder="e.g. a candid morning rooftop workout, warm sunlight"
+                className="w-full resize-none rounded-2xl bg-slate-800/80 px-4 py-3 text-sm leading-6 text-slate-100 placeholder-slate-500 outline-none ring-1 ring-white/10 focus:ring-fuchsia-500/40 disabled:opacity-50"
+              />
+            </div>
+            {imageGenError && (
+              <p className="rounded-2xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">{imageGenError}</p>
+            )}
+            <button
+              type="button"
+              onClick={handleGenerateImage}
+              disabled={isGeneratingImage || !imagePrompt.trim()}
+              className="rounded-3xl bg-fuchsia-500 px-5 py-2 text-sm font-semibold text-white transition hover:bg-fuchsia-400 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {isGeneratingImage ? (
+                <span className="flex items-center gap-2">
+                  <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                  Generating image…
+                </span>
+              ) : "Generate Image"}
+            </button>
+            <p className="text-[11px] text-slate-600">The persona&apos;s visual style is prepended automatically; the result attaches as the post image, just like an upload.</p>
+          </div>
+        )}
+
+        {generatedPromptUsed && !showImageGen && (
+          <p className="mt-2 text-[11px] text-slate-600">
+            Generated from prompt: <span className="text-slate-500">{generatedPromptUsed.length > 160 ? generatedPromptUsed.slice(0, 160) + "…" : generatedPromptUsed}</span>
+          </p>
+        )}
       </div>
 
       {/* Instagram processed preview (after upload) */}
@@ -641,7 +802,7 @@ export default function CreatePost() {
             </span>
           ) : analysis ? "Re-generate Captions" : "Analyze & Generate Captions"}
         </button>
-        {!file && <p className="mt-1.5 text-xs text-slate-600">Select an image first.</p>}
+        {!hasImage && <p className="mt-1.5 text-xs text-slate-600">Select or generate an image first.</p>}
 
         {analyzeError && (
           <p className="mt-2 rounded-2xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
@@ -680,7 +841,7 @@ export default function CreatePost() {
         <textarea
           value={caption}
           onChange={e => setCaption(e.target.value)}
-          placeholder={file ? (analysis ? "Select a caption above or write your own…" : "Analyze the image first to generate captions…") : "Select an image first…"}
+          placeholder={hasImage ? (analysis ? "Select a caption above or write your own…" : "Analyze the image first to generate captions…") : "Select an image first…"}
           rows={6}
           disabled={isWorking || isDone}
           className="w-full resize-none rounded-2xl bg-slate-800/80 px-4 py-3 text-sm leading-6 text-slate-100 placeholder-slate-500 outline-none ring-1 ring-white/10 focus:ring-fuchsia-500/40 disabled:opacity-50"
