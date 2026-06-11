@@ -4,6 +4,7 @@ import { requireApiKey } from "@/lib/auth";
 import { supabaseServer } from "@/lib/supabase-server";
 import type { PerformanceRecommendation, PerformanceReview, PostInsights } from "@/lib/supabase";
 import { getPersonaForAccount, personaPromptBlock } from "@/lib/persona";
+import { getActiveLearnings, learningsPromptBlock } from "@/lib/learning";
 
 const NOTES_MAX = 2_000;
 const MODEL = "claude-sonnet-4-5";
@@ -187,9 +188,10 @@ Rules:
 - Only give a "Timing" recommendation if there are enough posts across different times/days to justify it
 - If data is thin or metrics are limited, set "limited": true and keep recommendations cautious and caveated`;
 
-  // Persona context (in-character recommendations when the account has one)
+  // Persona + learnings context
   const persona = await getPersonaForAccount(body.account_id ?? null);
   const personaBlock = personaPromptBlock(persona);
+  const learningsBlock = learningsPromptBlock(await getActiveLearnings(body.account_id ?? null));
 
   console.log(
     `[performance-review/generate] posts=${posts.length} campaign=${body.campaign_id ?? "any"} ` +
@@ -202,7 +204,7 @@ Rules:
     const response = await anthropic.messages.create({
       model: MODEL,
       max_tokens: 2048,
-      messages: [{ role: "user", content: (personaBlock ? `${personaBlock}\n\n` : "") + prompt }],
+      messages: [{ role: "user", content: [personaBlock, learningsBlock, prompt].filter(Boolean).join("\n\n") }],
     });
     const block = response.content.find(b => b.type === "text");
     rawText = block && "text" in block ? block.text : "";

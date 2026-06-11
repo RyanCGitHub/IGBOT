@@ -164,6 +164,33 @@ export type GeneratedMedia = {
   created_at: string;
 };
 
+// ─── Performance learning engine (Part 3) ───────────────────────────────────────
+
+// AI-classified tags for a post (1 row per post). Derivable fields (persona,
+// campaign, posted hour/day, caption length) are computed at analysis time, not stored.
+export type PostAttributes = {
+  id: number;
+  post_id: number;
+  content_pillar: string | null;
+  caption_style: string | null;       // hook-question | storytelling | listicle | cta-heavy | …
+  media_source: string | null;        // 'uploaded' | 'ai_generated'
+  image_style_summary: string | null;
+  hashtag_set: string[] | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type Learning = {
+  id: number;
+  account_id: number;
+  persona_id: number | null;
+  finding: string;
+  evidence: Record<string, unknown> | null;
+  status: string;                      // 'active' | 'archived'
+  created_at: string;
+  updated_at: string;
+};
+
 export type PostStatus = 'draft' | 'approved' | 'scheduled' | 'posted';
 
 // Single source of truth — import this in every route that validates status.

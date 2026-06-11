@@ -3,6 +3,14 @@ import { anthropic } from "@/lib/claude";
 import { requireApiKey } from "@/lib/auth";
 import type { CaptionOption } from "@/lib/supabase";
 import { getPersonaForAccount, personaPromptBlock, applyDisclosure } from "@/lib/persona";
+import { getActiveLearnings, learningsPromptBlock } from "@/lib/learning";
+
+export type SuggestedAttributes = {
+  content_pillar?: string;
+  caption_style?: string;
+  image_style_summary?: string;
+  hashtag_set?: string[];
+};
 
 const MAX_BYTES = 8 * 1024 * 1024;
 const ACCEPTED_TYPES = ["image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif"] as const;
@@ -26,6 +34,7 @@ export type AnalyzeResponse = {
   analysis: ImageAnalysis;
   caption: string;           // backward-compat: professional option text (caption + hashtags)
   captionOptions: CaptionOption[];
+  attributes?: SuggestedAttributes | null;  // AI-classified tags for analytics (Part 3)
   debug: {
     model: string;
     imageSentToAI: boolean;
@@ -81,14 +90,21 @@ Study the image carefully and return a JSON object with EXACTLY this structure (
       "caption": "Punchy and memorable — 1-2 lines max, built to stop the scroll",
       "hashtags": "#hashtag1 #hashtag2 #hashtag3"
     }
-  ]
+  ],
+  "attributes": {
+    "content_pillar": "which content theme/pillar this post best fits",
+    "caption_style": "one of: hook-question, storytelling, listicle, cta-heavy, short-viral",
+    "image_style_summary": "one short phrase describing the visual style",
+    "hashtag_set": ["#tag1", "#tag2", "#tag3"]
+  }
 }
 
 Rules:
 - Respond with ONLY the JSON object, no surrounding text
 - Make ALL captions specific to THIS image — never generic
 - Each caption style must be genuinely different in tone
-- Keep hashtags relevant to the actual image content`;
+- Keep hashtags relevant to the actual image content
+- attributes: classify the post for analytics; caption_style MUST be one of the listed values`;
 
 export async function POST(request: Request) {
   const authError = requireApiKey(request);
@@ -122,6 +138,8 @@ export async function POST(request: Request) {
   const accountId = accountIdRaw != null && String(accountIdRaw).trim() ? Number(accountIdRaw) : null;
   const persona = await getPersonaForAccount(Number.isInteger(accountId) ? accountId : null);
   const personaBlock = personaPromptBlock(persona);
+  const learnings = await getActiveLearnings(Number.isInteger(accountId) ? accountId : null);
+  const learningsBlock = learningsPromptBlock(learnings);
 
   const arrayBuffer = await file.arrayBuffer();
   const base64 = Buffer.from(arrayBuffer).toString("base64");
@@ -148,7 +166,7 @@ export async function POST(request: Request) {
           role: "user",
           content: [
             { type: "image", source: { type: "base64", media_type: mediaType, data: base64 } },
-            { type: "text", text: personaBlock ? `${personaBlock}\n\n${VISION_PROMPT}` : VISION_PROMPT },
+            { type: "text", text: [personaBlock, learningsBlock, VISION_PROMPT].filter(Boolean).join("\n\n") },
           ],
         },
       ],
@@ -161,7 +179,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: false, error: `AI analysis failed: ${msg}` }, { status: 500 });
   }
 
-  let parsed: { analysis: ImageAnalysis; captionOptions: CaptionOption[] };
+  let parsed: { analysis: ImageAnalysis; captionOptions: CaptionOption[]; attributes?: SuggestedAttributes };
   try {
     const clean = rawText
       .trim()
@@ -200,6 +218,7 @@ export async function POST(request: Request) {
     analysis: parsed.analysis,
     caption,
     captionOptions,
+    attributes: parsed.attributes ?? null,
     debug: {
       model,
       imageSentToAI: true,

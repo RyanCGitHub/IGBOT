@@ -4,6 +4,7 @@ import { requireApiKey } from "@/lib/auth";
 import { supabaseServer } from "@/lib/supabase-server";
 import type { ScheduleSuggestion } from "@/lib/supabase";
 import { getPersonaForAccount, personaPromptBlock } from "@/lib/persona";
+import { getActiveLearnings, learningsPromptBlock } from "@/lib/learning";
 
 const NOTES_MAX = 2_000;
 const MODEL = "claude-sonnet-4-5";
@@ -141,9 +142,10 @@ export async function POST(request: Request) {
     accountName = data?.account_name ?? null;
   }
 
-  // Persona context (in-character suggestions when the account has one)
+  // Persona + learnings context (timing learnings help here)
   const persona = await getPersonaForAccount(body.account_id ?? null);
   const personaBlock = personaPromptBlock(persona);
+  const learningsBlock = learningsPromptBlock(await getActiveLearnings(body.account_id ?? null));
 
   // ── Existing scheduled posts in the window (occupied slots) ──────────────────
   let occupiedQuery = supabaseServer
@@ -177,7 +179,7 @@ export async function POST(request: Request) {
       messages: [
         {
           role: "user",
-          content: (personaBlock ? `${personaBlock}\n\n` : "") + buildPrompt({ campaign, accountName, startIso, endIso, count, notes: notes || null, occupied }),
+          content: [personaBlock, learningsBlock, buildPrompt({ campaign, accountName, startIso, endIso, count, notes: notes || null, occupied })].filter(Boolean).join("\n\n"),
         },
       ],
     });
