@@ -3,6 +3,7 @@
 // environment and never logged or returned.
 
 import type { ImageProvider, GenerateImageOptions, GeneratedImageResult } from "./types";
+import { safeJson } from "@/lib/media-generation/http";
 
 const OPENAI_IMAGES_URL = "https://api.openai.com/v1/images/generations";
 const OPENAI_EDITS_URL = "https://api.openai.com/v1/images/edits";
@@ -33,7 +34,7 @@ export function createOpenAIImageProvider(): ImageProvider {
         body: JSON.stringify({ model: MODEL, prompt, size, n: 1 }),
       });
 
-      const data = (await res.json()) as OpenAIImagesResponse;
+      const data = await safeJson<OpenAIImagesResponse>(res, "OpenAI images");
 
       if (!res.ok) {
         throw new Error(data.error?.message ?? `OpenAI image request failed (HTTP ${res.status}).`);
@@ -73,7 +74,7 @@ export function createOpenAIImageProvider(): ImageProvider {
         body: form,
       });
 
-      const data = (await res.json()) as OpenAIImagesResponse;
+      const data = await safeJson<OpenAIImagesResponse>(res, "OpenAI images/edits");
       if (!res.ok) {
         throw new Error(data.error?.message ?? `OpenAI image edit failed (HTTP ${res.status}).`);
       }

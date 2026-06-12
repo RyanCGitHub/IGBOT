@@ -8,6 +8,7 @@
 // Endpoints verified against developers.heygen.com (v3) on 2026-06-12.
 
 import type { VideoJobCheck } from "@/lib/media-generation/fal";
+import { safeJson } from "@/lib/media-generation/http";
 
 const HEYGEN_BASE = "https://api.heygen.com";
 
@@ -55,7 +56,7 @@ export async function submitTalkingImage(params: {
     }),
   });
 
-  const data = (await res.json()) as { data?: { video_id?: string }; video_id?: string } & HeygenError;
+  const data = await safeJson<{ data?: { video_id?: string }; video_id?: string } & HeygenError>(res, "HeyGen submit");
   const videoId = data.data?.video_id ?? data.video_id;
   if (!res.ok || !videoId) {
     throw new Error(`HeyGen video submit failed: ${heygenErrorMessage(data, res.status)}`);
@@ -70,11 +71,11 @@ export async function checkHeygenVideo(videoId: string): Promise<VideoJobCheck> 
     headers: { "x-api-key": heygenKey() },
   });
 
-  const data = (await res.json()) as {
+  const data = await safeJson<{
     data?: { status?: string; video_url?: string; error?: { message?: string } };
     status?: string;
     video_url?: string;
-  } & HeygenError;
+  } & HeygenError>(res, "HeyGen status");
 
   if (!res.ok) {
     // 4xx → unknown/expired id (terminal); 5xx → transient, retry next tick.
