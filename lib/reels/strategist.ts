@@ -90,7 +90,7 @@ Return a JSON object with EXACTLY this structure (no markdown, no code blocks):
   "hook": "the scroll-stopping idea of the reel in one sentence",
   "content_pillar": "short label for this account's content pillar",
   "event_location": "the real place and year of the event, e.g. 'Lake Nyos, Cameroon, 1986'",
-  "wardrobe": "what the host wears, matched to this location/climate, one sentence",
+  "wardrobe": "what the host wears, matched to this location/climate, one sentence. Outdoor/nature: neutral adventure jacket, breathable shirt, hiking-style layers. City/culture: clean smart-casual. Cold events: layered jacket, scarf, gloves if appropriate. Tropical/beach: linen shirt or lightweight travel clothing. Always tasteful and practical — no flashy logos, no luxury branding, no distracting patterns",
   "beats": [
     {
       "shot_type": "avatar or broll",
@@ -116,6 +116,7 @@ Rules:
 - Beat 1 MUST be shot_type "avatar" (the host delivers the hook to camera) and the LAST beat must be "avatar" (host wraps up / CTA). Middle beats should be mostly "broll" of the event
 - Every beat needs a voiceover_line; together they form one continuous mini-story
 - voiceover_line must be max 12 words — it has to fit in ~5 seconds of speech
+- The host is a FICTIONAL recurring character — never base them on, compare them to, or name any real person or celebrity
 - avatar image_prompt: describe the SCENE around the host (location, weather, lighting, camera distance: chest-up, facing camera, mid-speech). Do NOT describe the host's face or identity — the host's appearance comes from a fixed reference image. DO include the wardrobe
 - broll image_prompt: the event/location itself, visually accurate to the real place. No people unless historically appropriate
 - No text or lettering in any image

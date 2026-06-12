@@ -85,11 +85,16 @@ async function ensureAvatar(account: AccountRow): Promise<{ buffer: Buffer; mime
     return { buffer: await downloadFromBucket(account.reels_avatar_path), mimeType: "image/png" };
   }
 
+  // A pre-seeded reels_avatar_prompt is the design brief (set per account, e.g.
+  // from the owner's identity spec). Fallback: generic brief from persona/niche.
+  // Either way the host must be FICTIONAL — never a real person or celebrity.
   const persona = await getPersonaForAccount(account.id);
-  const prompt = [
+  const prompt = account.reels_avatar_prompt?.trim() || [
     "Design the single recurring on-camera host for this short-form nature channel.",
+    "A completely fictional person — must not resemble or be based on any real person or celebrity.",
     "A friendly, warm, approachable presenter with an open smile, looking straight into the camera,",
     "chest-up portrait, soft natural outdoor lighting, photorealistic, neutral outdoor backdrop.",
+    "Natural realistic proportions, not cartoonish, not overly model-like.",
     "Practical outdoor field clothing. No text, no logos, no watermark.",
     persona?.visual_style ? `Channel visual style: ${persona.visual_style}` : null,
     account.niche ? `Channel niche: ${account.niche}` : null,
@@ -157,12 +162,13 @@ async function stageKeyframes(run: ReelRun): Promise<AdvanceResult> {
     if (isAvatarBeat && avatar && provider.editImage) {
       // Reference-based render: same host, new scene + location-matched wardrobe.
       promptUsed = [
-        "Place this exact person (same face, same identity) into the following scene as an on-camera host, chest-up, facing the camera mid-speech, friendly expression.",
+        "Place this exact person (same face, same identity, same hairstyle, same facial hair) into the following scene as an on-camera host, chest-up, facing the camera mid-speech, friendly expression.",
+        "This is a fictional recurring host — do not make them resemble any real person or celebrity.",
         brief.wardrobe ? `They are wearing: ${brief.wardrobe}` : null,
         brief.event_location ? `Location: ${brief.event_location} — the setting must look like the real place.` : null,
         beat.image_prompt,
         brief.visual_style,
-        "Vertical 9:16 composition. No text or lettering in the image.",
+        "Natural premium lighting, realistic cinematic quality. Vertical 9:16 composition. No text or lettering in the image.",
       ].filter(Boolean).join("\n\n");
       result = await provider.editImage(promptUsed, avatar, { size: "1024x1536" });
     } else {
