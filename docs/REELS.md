@@ -135,6 +135,24 @@ them — **reconnect each account once** ("force re-auth") to upgrade the token.
 Until then the learning engine scores on likes/comments only; everything
 degrades gracefully.
 
+## Scaling to 10 reels/day per account (owner target)
+
+The pipeline architecture supports it; these are the dials and the order to
+turn them. Scale **gradually (1 → 3 → 5 → 10), gated on retention metrics** —
+the research is unambiguous that quality beats cadence (the closest analogue
+account hit 615K followers on 21 total posts), and Instagram demotes accounts
+that read as spam/AI-slop. Volume is leverage only once the format is proven.
+
+| Dial | Today | At 10/day | Where |
+|---|---|---|---|
+| `reels_daily_cap` | 1–5 (UI cap) | raise validation to 10 | `app/api/reels/settings` + dashboard select |
+| `MEDIA_IMAGE_DAILY_CAP` | 20 | ~75 (50 keyframes + retries) | Vercel env |
+| Posting slots | single daily hour | spread across 6–10 staggered slots (code change: per-run slot assignment, ~90min spacing) | `nextPostingSlot` in stages |
+| Tick throughput | 3 runs/tick | raise `RUNS_PER_TICK` to ~6 | `app/api/reels/tick` |
+| Cost | ~$6/reel → ~$60/day (~$1.8K/mo) | add a DAILY aggregate spend guard (today's guard is per-reel only) | new check in planner |
+| Instagram API | 25 posts/24h hard limit | 10/day is safely inside | — |
+| Topic variety | recent-hooks dedup (8) | widen dedup window + pillar rotation so 10/day don't cannibalize | strategist |
+
 ## Other limits baked in
 
 - Daily cap of 1–5 reels/account (UI-enforced; Instagram's API limit is ~25 posts/24h).
