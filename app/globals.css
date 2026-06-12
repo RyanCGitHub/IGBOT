@@ -24,3 +24,19 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Ambient wave animation — runs while a reel is in production, paused when idle
+   (animation-play-state set inline by BackgroundWaves). */
+@keyframes waveDrift {
+  0%   { transform: translateX(0) translateY(0); }
+  50%  { transform: translateX(-60px) translateY(24px); }
+  100% { transform: translateX(0) translateY(0); }
+}
+@keyframes waveSway {
+  0%   { transform: translateX(0) translateY(0) rotate(0deg); }
+  50%  { transform: translateX(40px) translateY(-30px) rotate(0.6deg); }
+  100% { transform: translateX(0) translateY(0) rotate(0deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  [style*="waveDrift"], [style*="waveSway"] { animation: none !important; }
+}
