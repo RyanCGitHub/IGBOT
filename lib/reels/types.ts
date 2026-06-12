@@ -48,6 +48,7 @@ export type ReelBrief = {
   length_class?: "loop" | "narrative";   // V1: 8–15s loop or 60–90s narrative
   hook_archetype?: string;               // V5: collision | pov | shock-stat
   debatable_detail?: string | null;      // V19: one comment-bait-worthy comparison/question
+  cover_title?: string | null;           // V15: 3-5 word grid-cover title
   cost_estimate?: { totalUsd: number; capUsd: number }; // recorded by the cost guard
   // Presenter mode: the real documented event + where it happened (drives
   // location-accurate visuals and the host's wardrobe).
@@ -110,6 +111,7 @@ export type ReelRun = {
   clips: Clip[];
   audio: ReelRunAudio | null;
   assembled_video_path: string | null;
+  cover_path: string | null;
   caption: string | null;
   hashtags: string | null;
   ig_post_id: number | null;

@@ -13,7 +13,7 @@
 import type { ReelBrief } from "@/lib/reels/types";
 
 const RATE_HEYGEN_PER_S = 0.05;
-const RATE_KLING_PER_S = 0.06;
+const RATE_KLING_PER_S = 0.08; // v2.5-turbo pro ($0.07/s, rounded up)
 const RATE_LIPSYNC_PER_S = 0.05;
 const RATE_IMAGE = 0.07;
 const FIXED_OVERHEAD = 0.25; // TTS, music, storage egress

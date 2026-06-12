@@ -10,6 +10,24 @@ const OPENAI_EDITS_URL = "https://api.openai.com/v1/images/edits";
 const MODEL = "gpt-image-1";
 const DEFAULT_SIZE = "1024x1024";
 
+// OpenAI's image endpoints intermittently return 5xx gateway pages (observed
+// HTTP 502 on images/edits with no status-page incident). Retry in-call with
+// backoff so a flaky edge doesn't burn a whole scheduler-tick attempt.
+async function fetchWithRetry(input: string, init: RequestInit, attempts = 3): Promise<Response> {
+  let lastError: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const res = await fetch(input, init);
+      if (res.status < 500) return res;
+      lastError = new Error(`HTTP ${res.status} from ${input}`);
+    } catch (e) {
+      lastError = e;
+    }
+    if (i < attempts - 1) await new Promise<void>(r => setTimeout(r, 2_000 * (i + 1)));
+  }
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+}
+
 type OpenAIImagesResponse = {
   data?: Array<{ b64_json?: string }>;
   usage?: unknown;
@@ -25,7 +43,7 @@ export function createOpenAIImageProvider(): ImageProvider {
 
       const size = options?.size ?? DEFAULT_SIZE;
 
-      const res = await fetch(OPENAI_IMAGES_URL, {
+      const res = await fetchWithRetry(OPENAI_IMAGES_URL, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -58,21 +76,40 @@ export function createOpenAIImageProvider(): ImageProvider {
       if (!key) throw new Error("OPENAI_API_KEY is not set on the server.");
 
       const size = options?.size ?? DEFAULT_SIZE;
-      const form = new FormData();
-      form.append("model", MODEL);
-      form.append("prompt", prompt);
-      form.append("size", size);
-      form.append(
-        "image[]",
-        new Blob([new Uint8Array(reference.buffer)], { type: reference.mimeType }),
-        reference.mimeType === "image/jpeg" ? "reference.jpg" : "reference.png"
-      );
 
-      const res = await fetch(OPENAI_EDITS_URL, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${key}` }, // content-type set by FormData
-        body: form,
-      });
+      // FormData bodies cannot be reused across fetch attempts in all
+      // runtimes — rebuild per attempt via a factory.
+      const makeForm = () => {
+        const f = new FormData();
+        f.append("model", MODEL);
+        f.append("prompt", prompt);
+        f.append("size", size);
+        f.append(
+          "image[]",
+          new Blob([new Uint8Array(reference.buffer)], { type: reference.mimeType }),
+          reference.mimeType === "image/jpeg" ? "reference.jpg" : "reference.png"
+        );
+        return f;
+      };
+
+      let res: Response | null = null;
+      let lastErr: unknown;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          res = await fetch(OPENAI_EDITS_URL, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${key}` }, // content-type set by FormData
+            body: makeForm(),
+          });
+          if (res.status < 500) break;
+          lastErr = new Error(`HTTP ${res.status} from images/edits`);
+        } catch (e) {
+          lastErr = e;
+          res = null;
+        }
+        if (attempt < 2) await new Promise<void>(r => setTimeout(r, 2_000 * (attempt + 1)));
+      }
+      if (!res) throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
 
       const data = await safeJson<OpenAIImagesResponse>(res, "OpenAI images/edits");
       if (!res.ok) {

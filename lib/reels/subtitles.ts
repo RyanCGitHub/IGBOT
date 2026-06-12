@@ -17,7 +17,8 @@ const STROKE_W = 8;
 
 let fontPromise: Promise<opentype.Font> | null = null;
 
-async function loadFont(): Promise<opentype.Font> {
+// Exported for the cover renderer (lib/reels/cover.ts) — same bundled font.
+export async function loadFont(): Promise<opentype.Font> {
   if (!fontPromise) {
     fontPromise = (async () => {
       const p = path.join(process.cwd(), "assets", "fonts", "DejaVuSans-Bold.ttf");
@@ -30,19 +31,29 @@ async function loadFont(): Promise<opentype.Font> {
 
 // Glyph-by-glyph path building (Font.getPath would run the Bidi/GSUB shaper,
 // which rejects DejaVu's ccmp lookups). Kerning applied manually.
-function linePath(font: opentype.Font, text: string, baselineY: number): { d: string; width: number } {
-  const scale = FONT_SIZE / font.unitsPerEm;
+// Exported for the cover renderer.
+export function glyphLinePath(
+  font: opentype.Font,
+  text: string,
+  baselineY: number,
+  fontSize: number
+): { d: string; width: number } {
+  const scale = fontSize / font.unitsPerEm;
   let x = 0;
   let d = "";
   let prev: opentype.Glyph | null = null;
   for (const ch of text) {
     const glyph = font.charToGlyph(ch);
     if (prev) x += font.getKerningValue(prev, glyph) * scale;
-    d += glyph.getPath(x, baselineY, FONT_SIZE).toPathData(1);
+    d += glyph.getPath(x, baselineY, fontSize).toPathData(1);
     x += (glyph.advanceWidth ?? 0) * scale;
     prev = glyph;
   }
   return { d, width: x };
+}
+
+function linePath(font: opentype.Font, text: string, baselineY: number): { d: string; width: number } {
+  return glyphLinePath(font, text, baselineY, FONT_SIZE);
 }
 
 // Renders one subtitle (1–2 lines, centered, white with black outline) onto a

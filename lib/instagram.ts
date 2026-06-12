@@ -84,7 +84,8 @@ export async function createReelsContainer(
   accessToken: string,
   videoUrl: string,
   caption: string,
-  log: PublishLogger
+  log: PublishLogger,
+  coverUrl?: string | null
 ): Promise<{ containerId: string } | { error: string }> {
   const url = `https://graph.facebook.com/v21.0/${igUserId}/media`;
   const body = {
@@ -92,6 +93,9 @@ export async function createReelsContainer(
     video_url: videoUrl,
     caption,
     share_to_feed: true,
+    // Custom grid cover (JPEG URL). Graph API also accepts thumb_offset; we
+    // always render a branded cover so cover_url wins when present.
+    ...(coverUrl ? { cover_url: coverUrl } : {}),
   };
 
   log.add({
