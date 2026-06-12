@@ -28,10 +28,10 @@ const STAGE_LABELS: Record<string, string> = {
 };
 
 function statusChipClasses(status: string): string {
-  if (status === "published") return "border-emerald-200 bg-emerald-50 text-emerald-700";
-  if (status === "failed") return "border-rose-200 bg-rose-50 text-rose-600";
-  if (status === "publishing" || status === "captioned") return "border-amber-200 bg-amber-50 text-amber-700";
-  return "border-sky-200 bg-sky-50 text-sky-700";
+  if (status === "published") return "border-emerald-500/40 bg-emerald-500/10 text-emerald-300";
+  if (status === "failed") return "border-rose-500/40 bg-rose-500/10 text-rose-300";
+  if (status === "publishing" || status === "captioned") return "border-amber-500/40 bg-amber-500/10 text-amber-300";
+  return "border-sky-500/40 bg-sky-500/10 text-sky-300";
 }
 
 function stageProgress(status: string): number {
@@ -125,20 +125,20 @@ export default function ReelsAutopilot() {
 
   return (
     <div className="space-y-5">
-      {error && <p className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-600">{error}</p>}
-      {notice && <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">{notice}</p>}
+      {error && <p className="rounded-xl border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">{error}</p>}
+      {notice && <p className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-300">{notice}</p>}
 
       {/* Per-account autopilot settings */}
       <div className="space-y-3">
         {isLoading ? (
-          <div className="h-20 animate-pulse rounded-xl bg-slate-200/60" />
+          <div className="h-20 animate-pulse rounded-xl bg-slate-800/60" />
         ) : accounts.length === 0 ? (
-          <p className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-500">
+          <p className="rounded-xl border border-slate-700/60 bg-slate-900/60 px-3 py-3 text-sm text-slate-400">
             Connect an Instagram account first — autopilot is configured per account.
           </p>
         ) : (
           accounts.map(account => (
-            <div key={account.id} className="rounded-2xl border border-slate-200 bg-white p-4">
+            <div key={account.id} className="rounded-2xl border border-slate-700/60 bg-slate-900/60 p-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
                   <button
@@ -147,13 +147,13 @@ export default function ReelsAutopilot() {
                     aria-checked={account.reels_autopilot_enabled}
                     disabled={busyAccountId === account.id}
                     onClick={() => patchAccount(account.id, { reels_autopilot_enabled: !account.reels_autopilot_enabled })}
-                    className={`relative h-6 w-11 rounded-full transition ${account.reels_autopilot_enabled ? "bg-emerald-500" : "bg-slate-300"} disabled:opacity-50`}
+                    className={`relative h-6 w-11 rounded-full transition ${account.reels_autopilot_enabled ? "bg-emerald-500" : "bg-slate-600"} disabled:opacity-50`}
                   >
-                    <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${account.reels_autopilot_enabled ? "left-[22px]" : "left-0.5"}`} />
+                    <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-slate-800 shadow transition-all ${account.reels_autopilot_enabled ? "left-[22px]" : "left-0.5"}`} />
                   </button>
                   <div>
-                    <p className="text-sm font-semibold text-slate-800">@{account.account_name}</p>
-                    <p className="text-xs text-slate-500">
+                    <p className="text-sm font-semibold text-slate-100">@{account.account_name}</p>
+                    <p className="text-xs text-slate-400">
                       {account.reels_autopilot_enabled
                         ? `Autopilot ON — ${account.reels_daily_cap} reel${account.reels_daily_cap > 1 ? "s" : ""}/day around ${account.posting_hour_utc ?? 17}:00 UTC`
                         : "Autopilot off — reels only via Queue now"}
@@ -161,24 +161,24 @@ export default function ReelsAutopilot() {
                   </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <label className="flex items-center gap-1.5 text-xs text-slate-500">
+                  <label className="flex items-center gap-1.5 text-xs text-slate-400">
                     Reels/day
                     <select
                       value={account.reels_daily_cap}
                       disabled={busyAccountId === account.id}
                       onChange={e => patchAccount(account.id, { reels_daily_cap: Number(e.target.value) })}
-                      className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700"
+                      className="rounded-lg border border-slate-700/60 bg-slate-900/60 px-2 py-1 text-xs text-slate-200"
                     >
                       {[1, 2, 3, 4, 5].map(n => <option key={n} value={n}>{n}</option>)}
                     </select>
                   </label>
-                  <label className="flex items-center gap-1.5 text-xs text-slate-500">
+                  <label className="flex items-center gap-1.5 text-xs text-slate-400">
                     Post hour (UTC)
                     <select
                       value={account.posting_hour_utc ?? ""}
                       disabled={busyAccountId === account.id}
                       onChange={e => patchAccount(account.id, { posting_hour_utc: e.target.value === "" ? null : Number(e.target.value) })}
-                      className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700"
+                      className="rounded-lg border border-slate-700/60 bg-slate-900/60 px-2 py-1 text-xs text-slate-200"
                     >
                       <option value="">default</option>
                       {Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{h}:00</option>)}
@@ -204,7 +204,7 @@ export default function ReelsAutopilot() {
                     const value = e.target.value.trim() || null;
                     if (value !== (account.niche ?? null)) patchAccount(account.id, { niche: value });
                   }}
-                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 outline-none focus:ring-2 focus:ring-fuchsia-300"
+                  className="w-full rounded-xl border border-slate-700/60 bg-slate-900/60 px-3 py-2 text-xs text-slate-200 outline-none focus:ring-2 focus:ring-fuchsia-500/50"
                 />
               </div>
             </div>
@@ -215,32 +215,32 @@ export default function ReelsAutopilot() {
       {/* Pipeline runs */}
       <div>
         <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-slate-800">Production pipeline</h3>
+          <h3 className="text-sm font-semibold text-slate-100">Production pipeline</h3>
           <button
             type="button"
             onClick={refresh}
-            className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-600 transition hover:bg-slate-50"
+            className="rounded-lg border border-slate-700/60 bg-slate-900/60 px-2.5 py-1 text-xs font-medium text-slate-300 transition hover:bg-slate-800"
           >
             Refresh
           </button>
         </div>
         <div className="mt-2 space-y-2">
           {isLoading ? (
-            <div className="h-16 animate-pulse rounded-xl bg-slate-200/60" />
+            <div className="h-16 animate-pulse rounded-xl bg-slate-800/60" />
           ) : runs.length === 0 ? (
-            <p className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-500">
+            <p className="rounded-xl border border-slate-700/60 bg-slate-900/60 px-3 py-3 text-sm text-slate-400">
               No reels in production yet. Turn on autopilot or queue one manually.
             </p>
           ) : (
             runs.map(run => (
-              <div key={run.id} className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+              <div key={run.id} className="rounded-xl border border-slate-700/60 bg-slate-900/60 px-3 py-2.5">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-medium text-slate-800">
+                    <p className="truncate text-sm font-medium text-slate-100">
                       {run.title ?? `Run #${run.id}`}
                       {run.account_name && <span className="ml-2 text-xs font-normal text-slate-400">@{run.account_name}</span>}
                     </p>
-                    {run.hook && <p className="mt-0.5 truncate text-xs text-slate-500">{run.hook}</p>}
+                    {run.hook && <p className="mt-0.5 truncate text-xs text-slate-400">{run.hook}</p>}
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
                     <span className={`rounded-full border px-2.5 py-0.5 text-[11px] font-medium ${statusChipClasses(run.status)}`}>
@@ -251,31 +251,31 @@ export default function ReelsAutopilot() {
                 </div>
 
                 {run.status !== "failed" && run.status !== "published" && (
-                  <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100">
+                  <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-800">
                     <div className="h-full rounded-full bg-fuchsia-400 transition-all" style={{ width: `${stageProgress(run.status)}%` }} />
                   </div>
                 )}
 
-                <div className="mt-2 flex flex-wrap items-center gap-3 text-[11px] text-slate-500">
+                <div className="mt-2 flex flex-wrap items-center gap-3 text-[11px] text-slate-400">
                   {run.beats > 0 && <span>{run.keyframes_done}/{run.beats} keyframes · {run.clips_done}/{run.beats} clips</span>}
                   {run.audio_mood && <span>audio: {run.audio_mood}</span>}
                   {run.scheduled_for && run.status === "captioned" && (
                     <span>slot: {new Date(run.scheduled_for).toLocaleString()}</span>
                   )}
                   {run.video_url && (
-                    <a href={run.video_url} target="_blank" rel="noreferrer" className="font-medium text-fuchsia-600 hover:underline">
+                    <a href={run.video_url} target="_blank" rel="noreferrer" className="font-medium text-fuchsia-400 hover:underline">
                       Preview video
                     </a>
                   )}
                   {run.permalink && (
-                    <a href={run.permalink} target="_blank" rel="noreferrer" className="font-medium text-emerald-600 hover:underline">
+                    <a href={run.permalink} target="_blank" rel="noreferrer" className="font-medium text-emerald-400 hover:underline">
                       View on Instagram
                     </a>
                   )}
                 </div>
 
                 {run.error_message && (
-                  <p className="mt-2 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-[11px] text-rose-600">
+                  <p className="mt-2 rounded-lg border border-rose-500/40 bg-rose-500/10 px-2.5 py-1.5 text-[11px] text-rose-300">
                     {run.status === "failed" ? `Failed at ${run.failed_stage ?? "?"}: ` : `Retrying (attempt ${run.attempt_count}): `}
                     {run.error_message}
                   </p>

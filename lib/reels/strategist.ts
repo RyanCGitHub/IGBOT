@@ -13,9 +13,10 @@ const MODEL = "claude-sonnet-4-5";
 // Non-presenter (legacy image-style) reels:
 const MIN_BEATS = 3;
 const MAX_BEATS = 5;
-// Presenter narrative reels (viral ruleset V1: 60–90s total, beats of 4–8s):
-const NARRATIVE_MIN_BEATS = 9;
-const NARRATIVE_MAX_BEATS = 14;
+// Presenter narrative reels (V1 + owner directive V31: exactly 5 scenes,
+// 60–90s total — avatar scenes run long via HeyGen, b-roll capped by Kling):
+const NARRATIVE_MIN_BEATS = 5;
+const NARRATIVE_MAX_BEATS = 5;
 // Presenter loop reels (viral ruleset V1: 8–15s total, replay-engineered):
 const LOOP_MIN_BEATS = 2;
 const LOOP_MAX_BEATS = 3;
@@ -92,8 +93,9 @@ function buildPrompt(parts: {
   const lengthRules = isLoop
     ? `- ${LOOP_MIN_BEATS} to ${LOOP_MAX_BEATS} beats, each duration_s between 4 and 8, TOTAL duration 8–15 seconds — this is a replay-engineered LOOP reel: one single jaw-dropping idea, no slow build
 - Structure: beat 1 = avatar hook (host already mid-spectacle, premise instant), final beat = the visual payoff. Write the last voiceover line so it flows seamlessly back into the first (the reel must loop invisibly)`
-    : `- ${NARRATIVE_MIN_BEATS} to ${NARRATIVE_MAX_BEATS} beats, each duration_s between 4 and 8, TOTAL duration 60–90 seconds — this is a narrative reel that accumulates watch time
-- The LAST beat is "avatar": host wraps with the payoff + the debatable question. Middle beats alternate: roughly 40-50% broll of the event, the rest host-on-camera pushing the story forward
+    : `- EXACTLY 5 beats (5 keyframes → 5 clips), TOTAL duration 60–90 seconds — this is a narrative reel that accumulates watch time
+- Beat durations: "avatar" beats 10–16 seconds each (the host can speak at length — his clip stretches to his words); "broll" beats 8–10 seconds
+- Structure: beat 1 avatar hook → beats 2–4 alternate broll spectacle and avatar story-pushing (at least 2 broll) → beat 5 avatar payoff + the debatable question
 - Every beat needs a voiceover_line; together they form one continuous story with the payoff held until the final 20%`;
 
   if (parts.presenter) {
@@ -234,10 +236,17 @@ function clampBrief(raw: Record<string, unknown>, presenter: boolean, lengthClas
     const subtitle = String(b.subtitle ?? "").trim().slice(0, 80);
     const image_prompt = String(b.image_prompt ?? "").trim();
     if (!subtitle || !image_prompt) throw new Error(`Beat ${i + 1} is missing subtitle or image_prompt.`);
+
+    // Duration bounds depend on shot type: avatar clips stretch to their audio
+    // (HeyGen), so narrative avatar beats may run 8–16s; broll is Kling-capped
+    // at 10s. Loop reels stay tight (4–8s).
+    const shotType = presenter ? (b.shot_type === "avatar" ? "avatar" : "broll") : undefined;
+    const narrativeAvatar = presenter && !isLoop && shotType === "avatar";
+    const minD = presenter ? (isLoop ? 4 : narrativeAvatar ? 8 : 6) : 3;
+    const maxD = presenter ? (isLoop ? 8 : narrativeAvatar ? 16 : 10) : 6;
     const d = Number(b.duration_s);
-    const duration_s = Number.isFinite(d)
-      ? Math.min(Math.max(d, presenter ? 4 : 3), presenter ? 8 : 6)
-      : presenter ? 6 : 5;
+    const duration_s = Number.isFinite(d) ? Math.min(Math.max(d, minD), maxD) : Math.round((minD + maxD) / 2);
+
     const beat: ReelBeat = {
       subtitle,
       image_prompt,
@@ -245,7 +254,7 @@ function clampBrief(raw: Record<string, unknown>, presenter: boolean, lengthClas
       duration_s,
     };
     if (presenter) {
-      beat.shot_type = b.shot_type === "avatar" ? "avatar" : "broll";
+      beat.shot_type = shotType;
       const line = String(b.voiceover_line ?? "").trim();
       if (!line) throw new Error(`Beat ${i + 1} is missing voiceover_line (required in presenter mode).`);
       // V13 word budget. Avatar clips stretch to their audio (+~2s grace in

@@ -94,6 +94,43 @@ function chunkSubtitle(text: string): string[] {
   return chunks;
 }
 
+// Per-clip voiceover loudness equalization (owner: "audio still slightly
+// off" — each beat's TTS call lands at a different level, which reads as tone
+// jumps). Decode to raw PCM (codec only — no ffmpeg filters, which the prod
+// binary lacks), measure RMS in JS, and equalize via per-input amix weights.
+const VO_TARGET_DB = -20;
+
+function rmsDb(file: string): Promise<number | null> {
+  return new Promise(resolve => {
+    const proc = spawn(ffmpegBin(), [
+      "-hide_banner", "-loglevel", "error",
+      "-i", file, "-f", "s16le", "-ac", "1", "-ar", "16000", "pipe:1",
+    ]);
+    const chunks: Buffer[] = [];
+    proc.stdout.on("data", d => chunks.push(d as Buffer));
+    proc.on("error", () => resolve(null));
+    proc.on("close", code => {
+      if (code !== 0 || chunks.length === 0) return resolve(null);
+      const pcm = Buffer.concat(chunks);
+      const n = Math.floor(pcm.length / 2);
+      if (n === 0) return resolve(null);
+      let sum = 0;
+      for (let i = 0; i < n; i++) {
+        const s = pcm.readInt16LE(i * 2) / 32768;
+        sum += s * s;
+      }
+      const rms = Math.sqrt(sum / n);
+      resolve(rms > 0 ? 20 * Math.log10(rms) : null);
+    });
+  });
+}
+
+function voWeight(db: number | null): number {
+  if (db == null) return 1;
+  const gain = Math.pow(10, (VO_TARGET_DB - db) / 20);
+  return Math.min(Math.max(gain, 0.5), 2.0);
+}
+
 // Parses "Duration: HH:MM:SS.cc" from ffmpeg -i stderr (exits non-zero by
 // design when no output is given — we only want the probe line).
 function probeDuration(file: string): Promise<number | null> {
@@ -133,7 +170,7 @@ export async function assembleReel(input: AssembleInput): Promise<Buffer> {
     const normalized: { file: string; duration: number }[] = [];
     for (const clip of input.clips) {
       const beat = input.beats[clip.beatIndex];
-      const briefDuration = Math.min(Math.max(beat?.duration_s ?? 5, 3), 8);
+      const briefDuration = Math.min(Math.max(beat?.duration_s ?? 5, 3), 16);
       const inFile = path.join(work, `in-${clip.beatIndex}.mp4`);
       const outFile = path.join(work, `norm-${clip.beatIndex}.mp4`);
       await writeFile(inFile, clip.buffer);
@@ -142,7 +179,7 @@ export async function assembleReel(input: AssembleInput): Promise<Buffer> {
       if (beat?.shot_type === "avatar") {
         const actual = await probeDuration(inFile);
         if (actual && actual > 1) {
-          duration = Math.min(Math.max(actual - 0.05, 2), briefDuration + 2.5, 10);
+          duration = Math.min(Math.max(actual - 0.05, 2), briefDuration + 2.5, 18);
         }
       }
 
@@ -245,10 +282,12 @@ export async function assembleReel(input: AssembleInput): Promise<Buffer> {
     // LINUX build ships without it (the darwin build has it, so local tests
     // pass either way). Gain staging is done via amix `weights` instead.
     const voLabels: string[] = [];
+    const voWeights: number[] = [];
     for (let k = 0; k < input.voiceovers.length; k++) {
       const vo = input.voiceovers[k];
       const voFile = path.join(work, `vo-${vo.beatIndex}.mp3`);
       await writeFile(voFile, vo.buffer);
+      voWeights.push(voWeight(await rmsDb(voFile)));
       args.push("-i", voFile);
       const idx = inputIdx++;
       const delayMs = Math.round((offsetByBeat.get(vo.beatIndex) ?? 0) * 1000);
@@ -263,7 +302,7 @@ export async function assembleReel(input: AssembleInput): Promise<Buffer> {
       // with a short fade-in; normalize=0 keeps the voice at full level.
       const gainEnv = Number(process.env.REELS_MUSIC_GAIN);
       const musicGain = Number.isFinite(gainEnv) && gainEnv > 0 && gainEnv <= 1 ? gainEnv : 0.15;
-      const weights = [String(musicGain), ...voLabels.map(() => "1")].join(" ");
+      const weights = [String(musicGain), ...voWeights.map(w => w.toFixed(2))].join(" ");
       filterParts.push(
         `[${musicIdx}:a]afade=t=in:st=0:d=0.6,${fadeOut}[m]`,
         `[m]${voLabels.join("")}amix=inputs=${voLabels.length + 1}:duration=longest:dropout_transition=0:normalize=0:weights='${weights}'[a]`
@@ -277,7 +316,7 @@ export async function assembleReel(input: AssembleInput): Promise<Buffer> {
       filterParts.push(
         voLabels.length === 1
           ? `${voLabels[0]}apad[a]`
-          : `${voLabels.join("")}amix=inputs=${voLabels.length}:duration=longest:dropout_transition=0:normalize=0,apad[a]`
+          : `${voLabels.join("")}amix=inputs=${voLabels.length}:duration=longest:dropout_transition=0:normalize=0:weights='${voWeights.map(w => w.toFixed(2)).join(" ")}',apad[a]`
       );
       audioMap = "[a]";
     } else {
