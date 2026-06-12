@@ -6,25 +6,20 @@
 // (yuv420p, 30fps, faststart), uploaded back to the bucket.
 //
 // Each clip is normalized in its own ffmpeg pass (scale/crop/trim/fade), then
-// concatenated, then a single final pass burns subtitles and mixes audio.
-// Subtitles use drawtext with a bundled font (assets/fonts) because serverless
-// images have no system fonts/fontconfig.
+// concatenated, then a single final pass composites subtitles and mixes audio.
+// Subtitles are pre-rendered PNGs (lib/reels/subtitles — the production ffmpeg
+// build has no drawtext) composited with the core `overlay` filter.
 
 import { spawn } from "node:child_process";
-import { mkdtemp, writeFile, readFile, rm, access } from "node:fs/promises";
+import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import ffmpegPath from "ffmpeg-static";
+import { renderSubtitlePng } from "@/lib/reels/subtitles";
 import type { ReelBeat } from "@/lib/reels/types";
 
 const FADE_S = 0.25;
 const FFMPEG_TIMEOUT_MS = 5 * 60_000; // per invocation
-
-async function fontFile(): Promise<string> {
-  const p = path.join(process.cwd(), "assets", "fonts", "DejaVuSans-Bold.ttf");
-  await access(p); // fail loudly if file tracing dropped the font
-  return p;
-}
 
 function ffmpegBin(): string {
   if (!ffmpegPath) throw new Error("ffmpeg binary not found (ffmpeg-static returned null).");
@@ -59,7 +54,7 @@ function runFfmpeg(args: string[]): Promise<void> {
 // Logs which of the filters we rely on are missing from this binary's
 // registry. Runs once per assembly — cheap, and decisive when builds differ
 // per platform (the linux ffmpeg-static build has bitten us already).
-const REQUIRED_FILTERS = ["drawtext", "adelay", "afade", "amix", "apad", "anull", "null", "scale", "crop", "fps", "fade", "format", "concat"];
+const REQUIRED_FILTERS = ["overlay", "adelay", "afade", "amix", "apad", "anull", "scale", "crop", "fps", "fade", "format"];
 
 async function logMissingFilters(): Promise<void> {
   try {
@@ -145,10 +140,15 @@ export async function assembleReel(input: AssembleInput): Promise<Buffer> {
 
     const totalDuration = normalized.reduce((s, n) => s + n.duration, 0);
 
-    // ── 3. Burn subtitles + mix audio in one final pass ────────────────────────
-    const font = await fontFile();
+    // ── 3. Composite subtitle PNGs + mix audio in one final pass ───────────────
+    // Subtitle PNG inputs come right after the video (indexes 1..N), each
+    // composited with the core overlay filter on its beat's time window.
+    const args: string[] = ["-y", "-i", silentFile];
+    const filterParts: string[] = [];
+    let inputIdx = 1;
+
     let t = 0;
-    const drawtexts: string[] = [];
+    const subWindows: { idx: number; start: number; end: number }[] = [];
     for (let i = 0; i < normalized.length; i++) {
       const beat = input.beats[i];
       const start = t;
@@ -157,21 +157,26 @@ export async function assembleReel(input: AssembleInput): Promise<Buffer> {
       if (!beat?.subtitle) continue;
       const text = wrapSubtitle(sanitizeSubtitle(beat.subtitle));
       if (!text) continue;
-      const subFile = path.join(work, `sub-${i}.txt`);
-      await writeFile(subFile, text);
-      drawtexts.push(
-        // expansion=none: render the file verbatim (no %{...} expansion, stray % is safe)
-        `drawtext=fontfile=${font}:textfile=${subFile}:expansion=none:fontsize=58:fontcolor=white:` +
-        `borderw=4:bordercolor=black@0.85:line_spacing=10:` +
-        `x=(w-text_w)/2:y=h*0.74:enable='between(t,${start.toFixed(2)},${(end - 0.05).toFixed(2)})'`
-      );
+      const { png } = await renderSubtitlePng(text);
+      const subFile = path.join(work, `sub-${i}.png`);
+      await writeFile(subFile, png);
+      args.push("-i", subFile);
+      subWindows.push({ idx: inputIdx++, start, end });
     }
-    const videoChain = drawtexts.length > 0 ? drawtexts.join(",") : "null";
 
-    const args: string[] = ["-y", "-i", silentFile];
-    const filterParts: string[] = [`[0:v]${videoChain}[v]`];
+    let prevLabel = "[0:v]";
+    subWindows.forEach((sub, k) => {
+      const out = `[ov${k}]`;
+      filterParts.push(
+        `${prevLabel}[${sub.idx}:v]overlay=(W-w)/2:H*0.74:` +
+        `enable='between(t,${sub.start.toFixed(2)},${(sub.end - 0.05).toFixed(2)})'${out}`
+      );
+      prevLabel = out;
+    });
+    // overlay can promote the pixel format — pin yuv420p on the way out.
+    filterParts.push(`${prevLabel}format=yuv420p[v]`);
+
     let audioMap: string | null = null;
-    let inputIdx = 1;
 
     let musicIdx = -1;
     if (input.music) {
