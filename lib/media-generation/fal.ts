@@ -188,13 +188,17 @@ export async function generateMusic(params: {
     body: JSON.stringify({
       prompt: `${params.mood} instrumental background music for a short-form vertical video, no vocals, clean loop`,
       seconds_total: seconds,
+      steps: 50, // default 100 risks sync-endpoint timeouts in serverless
     }),
   });
 
   const data = (await res.json()) as { audio_file?: { url?: string } } & FalError;
   const url = data.audio_file?.url;
   if (!res.ok || !url) {
-    throw new Error(`Music generation failed: ${falErrorMessage(data, res.status)}`);
+    // Body included so a silent degrade (music_source: none) is diagnosable from logs.
+    throw new Error(
+      `Music generation failed (HTTP ${res.status}): ${falErrorMessage(data, res.status)} | body: ${JSON.stringify(data).slice(0, 400)}`
+    );
   }
 
   const audioRes = await fetch(url);

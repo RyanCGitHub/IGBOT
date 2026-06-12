@@ -31,19 +31,24 @@ export const ACTIVE_STATUSES: ReelRunStatus[] = [
 export const AUDIO_MOODS = ["energetic", "chill", "inspiring", "dramatic", "playful"] as const;
 
 export type ReelBeat = {
-  subtitle: string;       // short on-screen line, burned into the video
+  subtitle: string;       // short on-screen line, burned into the video (V6: ≠ spoken line)
   image_prompt: string;   // keyframe prompt for the image provider
-  motion_prompt: string;  // camera/subject motion for image-to-video
-  duration_s: number;     // 3–6 seconds
+  motion_prompt: string;  // camera/subject motion for image-to-video / talking-image
+  duration_s: number;     // 3–8 seconds (V8: never hold a shot past ~6–8s)
   // Presenter mode only:
   shot_type?: "avatar" | "broll";  // avatar = host on camera (lip-synced); broll = event footage
-  voiceover_line?: string | null;  // what the host says during this beat
+  voiceover_line?: string | null;  // what the host says during this beat (V13: ~2.5 words/sec)
 };
 
 export type ReelBrief = {
   title: string;
   hook: string;
   content_pillar: string;
+  // Viral-algorithm fields (docs/VIRAL_ALGORITHM.md):
+  length_class?: "loop" | "narrative";   // V1: 8–15s loop or 60–90s narrative
+  hook_archetype?: string;               // V5: collision | pov | shock-stat
+  debatable_detail?: string | null;      // V19: one comment-bait-worthy comparison/question
+  cost_estimate?: { totalUsd: number; capUsd: number }; // recorded by the cost guard
   // Presenter mode: the real documented event + where it happened (drives
   // location-accurate visuals and the host's wardrobe).
   event_location?: string | null;
@@ -65,7 +70,8 @@ export type Keyframe = {
 
 export type Clip = {
   beat_index: number;
-  request_id: string;            // provider queue request id
+  provider?: "kling" | "heygen"; // which engine rendered this clip
+  request_id: string;            // provider queue request/video id
   submitted_at: string;          // ISO — stale jobs are resubmitted
   status: "submitted" | "done" | "failed";
   provider_url?: string;         // temporary provider URL

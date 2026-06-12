@@ -40,7 +40,11 @@ flow with cross-tick status polling.
 
 Required:
 
-- `FAL_KEY` — fal.ai API key (video clips + generated music)
+- `FAL_KEY` — fal.ai API key (b-roll clips, fallback avatar clips, generated music)
+- `HEYGEN_API_KEY` — HeyGen v3 API key. **Primary engine for the host's talking
+  segments** (`type:"image"`: our on-location keyframe + our TTS audio → lip-synced
+  performance in one call). When unset or erroring, avatar beats gracefully fall
+  back per-beat to Kling i2v + sync-lipsync (the previous chain).
 - `OPENAI_API_KEY` — already used for images; also used for TTS voiceover
 - `ANTHROPIC_API_KEY`, Supabase vars, `META_APP_ID`/`META_APP_SECRET` — as before
 - `CRON_SECRET` — required in production so only Vercel cron can drive the pipeline
@@ -64,6 +68,18 @@ Optional:
 - `REELS_TTS_MODEL` / `REELS_TTS_VOICE` (defaults `gpt-4o-mini-tts` / `alloy`)
 - `REELS_DEFAULT_POST_HOUR_UTC` (default 17) — used when the account has no `posting_hour_utc`
 - `REELS_PUBLISH_IMMEDIATELY` — `true` publishes as soon as a reel is ready (useful for testing)
+- `REELS_MAX_COST_USD` (default 12) — **owner-approved per-reel cost cap.** A run
+  whose worst-case estimate exceeds this fails at the brief stage, before any
+  paid generation. Raising it constitutes manual budget approval.
+
+## Viral ruleset
+
+Production follows the evidence-based ruleset in `docs/VIRAL_ALGORITHM.md`
+(V1–V27): presenter reels are 60–90s selfie-vlog narratives (9–14 beats of
+4–8s), hook premise in frame one, sequential 2–4-word captions at ~58% frame
+height (Meta safe zone), ~2.5 words/sec narration, 3–5 hashtags, 100–150 word
+captions with save/share CTAs, one debatable detail per reel, openly-fictional
+disclosed AI persona.
 
 ## Presenter (avatar host) mode
 
