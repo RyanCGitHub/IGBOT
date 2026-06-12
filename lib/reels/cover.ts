@@ -17,7 +17,6 @@ const H = 1920;
 const GRID_TOP = 240;      // 3:4 crop starts here on a 9:16 canvas
 const GRID_BOTTOM = 1680;  // and ends here
 const TITLE_MAX_WIDTH = 920;
-const WORDMARK = "FINN WALKER";
 
 export async function renderCover(keyframe: Buffer, title: string): Promise<Buffer> {
   const font = await loadFont();
@@ -47,13 +46,7 @@ export async function renderCover(keyframe: Buffer, title: string): Promise<Buff
     );
   });
 
-  // Series wordmark below the title, still inside the 3:4 region.
-  const wm = glyphLinePath(font, WORDMARK, GRID_BOTTOM - 55, 38);
-  paths.push(
-    `<path transform="translate(${((W - wm.width) / 2).toFixed(1)},0)" d="${wm.d}" fill="#000000" fill-opacity="0.45"/>`,
-    `<path transform="translate(${((W - wm.width) / 2 - 2).toFixed(1)},-2)" d="${wm.d}" fill="#ffffff" fill-opacity="0.92"/>`
-  );
-
+  // Wordmark removed per owner direction (2026-06-12) — title only.
   const gradTop = firstBaseline - fontSize - 120;
   const overlay = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
     <defs>
