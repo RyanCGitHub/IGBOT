@@ -72,7 +72,7 @@ export type AdvanceResult = { from: string; to: string; note?: string };
 
 async function stageBrief(run: ReelRun): Promise<AdvanceResult> {
   const account = await getAccount(run.account_id);
-  const { brief, personaId } = await generateReelBrief(account);
+  const { brief, personaId } = await generateReelBrief(account, run.directives);
 
   // Cost guard: nothing paid is generated for a run whose worst-case estimate
   // exceeds REELS_MAX_COST_USD (owner-approved cap, default $12).
