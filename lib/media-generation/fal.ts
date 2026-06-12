@@ -8,7 +8,9 @@
 const FAL_QUEUE_URL = "https://queue.fal.run";
 const FAL_SYNC_URL = "https://fal.run";
 
-const DEFAULT_VIDEO_MODEL = "fal-ai/kling-video/v2.1/standard/image-to-video";
+// v2.5 Turbo Pro: notably better motion fluidity and physics realism than the
+// v2.1 standard tier (~$0.07/s vs ~$0.056/s) — verified model id on fal.
+const DEFAULT_VIDEO_MODEL = "fal-ai/kling-video/v2.5-turbo/pro/image-to-video";
 const DEFAULT_MUSIC_MODEL = "fal-ai/stable-audio";
 
 function falKey(): string {

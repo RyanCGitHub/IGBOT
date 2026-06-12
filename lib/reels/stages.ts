@@ -12,6 +12,7 @@ import { estimateRunCost } from "@/lib/reels/cost";
 import { generateReelBrief } from "@/lib/reels/strategist";
 import { resolveMusic, synthesizeVoiceover, voiceoverEnabled } from "@/lib/reels/audio";
 import { assembleReel } from "@/lib/reels/assemble";
+import { renderCover } from "@/lib/reels/cover";
 import { uploadToBucket, downloadFromBucket, fetchToBuffer, publicUrlFor } from "@/lib/reels/storage";
 import {
   createLogger,
@@ -95,7 +96,13 @@ async function stageBrief(run: ReelRun): Promise<AdvanceResult> {
 
 async function ensureAvatar(account: AccountRow): Promise<{ buffer: Buffer; mimeType: string }> {
   if (account.reels_avatar_path) {
-    return { buffer: await downloadFromBucket(account.reels_avatar_path), mimeType: "image/png" };
+    // Re-encode the stored PNG reference (~2-3MB) to JPEG (~300KB) — identical
+    // identity anchoring, ~10x smaller multipart upload to images/edits (large
+    // bodies correlate with the 502 gateway flakes we've observed).
+    const png = await downloadFromBucket(account.reels_avatar_path);
+    const sharp = (await import("sharp")).default;
+    const jpeg = await sharp(png).jpeg({ quality: 88 }).toBuffer();
+    return { buffer: jpeg, mimeType: "image/jpeg" };
   }
 
   // A pre-seeded reels_avatar_prompt is the design brief (set per account, e.g.
@@ -610,14 +617,34 @@ Caption rules (follow exactly):
   const hashtags = String(parsed.hashtags ?? brief.hashtags).trim();
   if (!caption) throw new Error("Caption generator returned an empty caption.");
 
+  // V15: render the grid cover from the hook keyframe (host face shot) + the
+  // brief's cover title. Non-fatal — a reel without a custom cover still ships.
+  let coverPath: string | null = run.cover_path ?? null;
+  if (!coverPath) {
+    try {
+      const keyframes = (run.keyframes ?? []) as Keyframe[];
+      const hookKf = keyframes.find(k => k.beat_index === 0) ?? keyframes[0];
+      if (hookKf) {
+        const kfBuffer = await downloadFromBucket(hookKf.storage_path);
+        const title = brief.cover_title || brief.title;
+        const cover = await renderCover(kfBuffer, title);
+        const upload = await uploadToBucket(`reels/${run.id}/cover.jpg`, cover, "image/jpeg");
+        coverPath = upload.path;
+      }
+    } catch (e) {
+      console.error(`[reels/stages] cover render failed for run ${run.id} (continuing without):`, e instanceof Error ? e.message : e);
+    }
+  }
+
   await saveRun(run.id, {
     caption,
     hashtags,
+    cover_path: coverPath,
     scheduled_for: nextPostingSlot(account.posting_hour_utc),
     status: "captioned",
     error_message: null,
   });
-  return { from: "assembled", to: "captioned" };
+  return { from: "assembled", to: "captioned", note: coverPath ? "cover rendered" : "no cover" };
 }
 
 // ─── Stage: captioned → publishing (waits for the scheduled slot) ────────────
@@ -637,6 +664,7 @@ async function stageStartPublish(run: ReelRun): Promise<AdvanceResult> {
   const videoUrl = assembledVideoUrl(run);
   const fullCaption = [run.caption, run.hashtags].filter(Boolean).join("\n\n");
   const keyframes = run.keyframes as Keyframe[];
+  const coverUrl = run.cover_path ? publicUrlFor(run.cover_path) : null;
 
   // Create the ig_posts row first so the dashboard sees the reel immediately.
   let igPostId = run.ig_post_id;
@@ -647,7 +675,7 @@ async function stageStartPublish(run: ReelRun): Promise<AdvanceResult> {
         title: brief?.title ?? "Autopilot reel",
         caption: fullCaption,
         media_type: "reel",
-        image_url: keyframes?.[0]?.url ?? null, // cover thumbnail for the library UI
+        image_url: coverUrl ?? keyframes?.[0]?.url ?? null, // cover thumbnail for the library UI
         video_url: videoUrl,
         video_storage_path: run.assembled_video_path,
         account_id: run.account_id,
@@ -661,7 +689,7 @@ async function stageStartPublish(run: ReelRun): Promise<AdvanceResult> {
   }
 
   const log = createLogger();
-  const container = await createReelsContainer(account.ig_user_id, account.access_token, videoUrl, fullCaption, log);
+  const container = await createReelsContainer(account.ig_user_id, account.access_token, videoUrl, fullCaption, log, coverUrl);
   if ("error" in container) {
     await supabaseServer.from("ig_posts").update({ status: "failed", error_message: container.error, updated_at: new Date().toISOString() }).eq("id", igPostId);
     throw new Error(`Reels container creation failed: ${container.error}`);

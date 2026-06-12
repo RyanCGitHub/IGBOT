@@ -107,6 +107,7 @@ Return a JSON object with EXACTLY this structure (no markdown, no code blocks):
   "title": "internal working title",
   "hook": "the scroll-stopping idea of the reel in one sentence",
   "hook_archetype": "one of: collision (host in an impossible/extreme situation) | pov (second-person time/place transport) | shock-stat (a number that sounds fake but is true)",
+  "cover_title": "3-5 word grid-cover title in plain words — an impossible claim or curiosity gap (e.g. 'THE LAKE THAT EXPLODED', 'A DESERT BECAME AN OCEAN')",
   "content_pillar": "short label for this account's content pillar",
   "event_location": "the real place and year of the event, e.g. 'Lake Nyos, Cameroon, 1986'",
   "wardrobe": "what the host wears, matched to this location/climate, one sentence. Outdoor/nature: neutral adventure jacket, breathable shirt, hiking-style layers. City/culture: clean smart-casual. Cold events: layered jacket, scarf, gloves if appropriate. Tropical/beach: linen shirt or lightweight travel clothing. Always tasteful and practical — no flashy logos, no luxury branding, no distracting patterns",
@@ -134,11 +135,21 @@ Rules:
 - The event must be REAL and documented (no inventions). Name the real place; get the geography, climate, vegetation, and phenomenon visually right
 ${lengthRules}
 - Beat 1 IS the hook: shot_type "avatar", the FULL premise visible instantly (host already at the extreme location, mid-action — never an intro or establishing shot), spoken hook line complete within ~2 seconds of speech
+- HOOK CRAFT (this single line decides 200 views vs 2M — spend real effort):
+  * Internally draft FIVE different hooks across the archetypes, then output only the strongest as beat 1's voiceover_line
+  * It must be an OPEN LOOP: state the impossible/shocking thing as fact and withhold the explanation ("This lake killed 1,700 people overnight — silently" not "Today I'll tell you about a lake")
+  * BANNED openers: "Did you know", "Imagine", "Welcome to", "Today we're", "Let me tell you", "I'm standing in/at/here" — start mid-story instead
+  * Use true SPECIFIC numbers over adjectives ("60,000 pelicans" beats "thousands of birds"); never exaggerate a number to make the hook work
+  * Beat 1's subtitle is a ≤8-word curiosity gap that does NOT restate the spoken line — together they should make scrolling away feel like leaving a question unanswered
 - AVATAR COMPOSITION (critical): arm's-length SELFIE-VLOG POV — the host holds the camera himself, chest-up, slight wide-angle lens feel, direct eye contact, WALKING or MOVING through the real location, background alive (wind, water, steam). Never a static tripod presenter shot
 - The host is a FICTIONAL recurring character — never base them on, compare them to, or name any real person or celebrity
 - avatar image_prompt: describe the SCENE around the host (location, weather, lighting, selfie-POV framing: chest-up, arm extended toward camera just out of frame, facing camera mid-speech). Do NOT describe the host's face or identity — the host's appearance comes from a fixed reference image. DO include the wardrobe
 - avatar motion_prompt: natural body language for a selfie vlogger (walking, gesturing with free hand, glancing at surroundings then back to lens)
 - broll image_prompt: the event/location itself, visually accurate to the real place, with inherent motion potential. No people unless historically appropriate
+- VISUAL CONTINUITY (the reel must feel like ONE continuous take, not a slideshow): every beat shares the SAME time of day, weather, and color palette; each broll shot shows exactly what the host just described, from roughly where he stands; motion direction should carry across cuts (if beat 2 pans right, beat 3 continues the movement)
+- IMAGE DETAIL: every image_prompt must name foreground, midground, and background elements, the light source, and one atmospheric detail (heat shimmer, spray mist, dust haze) — generic prompts produce generic video
+- REALISM: photoreal smartphone-camera aesthetic — natural skin texture, true-to-life color, slight handheld energy, NO oversaturated 'AI cinematic' grading
+- HOOK PAYOFF: at least one broll beat must visually DELIVER the exact spectacle the hook promises (if the hook says a desert became an ocean, we must SEE water to the horizon over desert sand)
 - No text or lettering in any image
 - Favor angles the performance data says worked; avoid what underperformed`;
   }
@@ -230,6 +241,7 @@ function clampBrief(raw: Record<string, unknown>, presenter: boolean, lengthClas
     content_pillar: String(raw.content_pillar ?? "general").trim(),
     length_class: presenter ? lengthClass : undefined,
     hook_archetype: presenter ? String(raw.hook_archetype ?? "collision").trim() : undefined,
+    cover_title: presenter ? String(raw.cover_title ?? "").trim().split(/\s+/).slice(0, 6).join(" ") || null : null,
     debatable_detail: presenter ? String(raw.debatable_detail ?? "").trim() || null : null,
     event_location: presenter ? String(raw.event_location ?? "").trim() || null : null,
     wardrobe: presenter ? String(raw.wardrobe ?? "").trim() || null : null,

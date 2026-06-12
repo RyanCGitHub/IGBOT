@@ -146,12 +146,20 @@ export async function assembleReel(input: AssembleInput): Promise<Buffer> {
         }
       }
 
-      const fadeOutStart = Math.max(duration - FADE_S, 0);
+      // Seamless flow: STRAIGHT CUTS between beats — fade-to-black only enters
+      // the reel (first clip) and exits it (last clip). Per-beat fades read as
+      // a choppy slideshow.
+      const isFirst = input.clips.indexOf(clip) === 0;
+      const isLast = input.clips.indexOf(clip) === input.clips.length - 1;
+      const fades = [
+        isFirst ? `,fade=t=in:st=0:d=${FADE_S}` : "",
+        isLast ? `,fade=t=out:st=${Math.max(duration - FADE_S, 0)}:d=${FADE_S}` : "",
+      ].join("");
+
       await runFfmpeg([
         "-y", "-i", inFile,
         "-vf",
-        `scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30,` +
-        `fade=t=in:st=0:d=${FADE_S},fade=t=out:st=${fadeOutStart}:d=${FADE_S},format=yuv420p`,
+        `scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30${fades},format=yuv420p`,
         "-t", String(duration),
         "-an",
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
@@ -250,11 +258,14 @@ export async function assembleReel(input: AssembleInput): Promise<Buffer> {
 
     const fadeOut = `afade=t=out:st=${Math.max(totalDuration - 1, 0).toFixed(2)}:d=1`;
     if (musicIdx >= 0 && voLabels.length > 0) {
-      // Music ducked to 0.22 under speech via amix weights (music is the first
-      // input); normalize=0 keeps voices at full level instead of 1/N.
-      const weights = ["0.22", ...voLabels.map(() => "1")].join(" ");
+      // VOICE-FIRST MIX: the narration must always sit clearly on top. Music is
+      // a bed, ducked via amix weights (default 0.15, REELS_MUSIC_GAIN to tune)
+      // with a short fade-in; normalize=0 keeps the voice at full level.
+      const gainEnv = Number(process.env.REELS_MUSIC_GAIN);
+      const musicGain = Number.isFinite(gainEnv) && gainEnv > 0 && gainEnv <= 1 ? gainEnv : 0.15;
+      const weights = [String(musicGain), ...voLabels.map(() => "1")].join(" ");
       filterParts.push(
-        `[${musicIdx}:a]${fadeOut}[m]`,
+        `[${musicIdx}:a]afade=t=in:st=0:d=0.6,${fadeOut}[m]`,
         `[m]${voLabels.join("")}amix=inputs=${voLabels.length + 1}:duration=longest:dropout_transition=0:normalize=0:weights='${weights}'[a]`
       );
       audioMap = "[a]";

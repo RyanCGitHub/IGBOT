@@ -162,6 +162,18 @@ Apply to every reel and account decision. Tags: [E]/[PL] per §1.
   while small accounts gained reach. The window favors new accounts with
   high-quality original formats — and punishes generic AI slop.
 
+### I. Production-quality directives (owner additions, 2026-06-12)
+- **V28 [owner]** Voice-first mix: narration always sits clearly above the
+  music bed — music ducked to 0.15 default under speech (`REELS_MUSIC_GAIN`),
+  short bed fade-in, voice never attenuated.
+- **V29 [owner]** Seamless flow: straight cuts between beats — fade-to-black
+  only at reel start and end. No per-beat dissolves or dips.
+- **V30 [owner]** Continuity, detail, realism: one time-of-day/weather/palette
+  across all beats; image prompts specify foreground/midground/background +
+  light source + one atmospheric detail; photoreal smartphone aesthetic (no
+  "AI cinematic" grading); at least one b-roll beat visually delivers the
+  hook's exact promise. B-roll engine: Kling v2.5-turbo pro.
+
 ---
 
 ## 4. Provider stack decision (quality upgrade)
