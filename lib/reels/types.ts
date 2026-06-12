@@ -91,10 +91,18 @@ export type ReelRunAudio = {
   voiceover: boolean;
 };
 
+// Optional per-run instructions set at queue time by the planner or a manual
+// queue — lets a run request a specific approved format without env changes.
+export type RunDirectives = {
+  length_class?: "loop" | "narrative"; // V1 length classes; default narrative
+  topic_hint?: string;                 // optional steer for the strategist
+};
+
 export type ReelRun = {
   id: number;
   account_id: number;
   persona_id: number | null;
+  directives?: RunDirectives | null;
   status: ReelRunStatus;
   failed_stage: string | null;
   brief: ReelBrief | null;

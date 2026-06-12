@@ -7,7 +7,7 @@ import { supabaseServer } from "@/lib/supabase-server";
 import { getPersonaForAccount, personaPromptBlock } from "@/lib/persona";
 import { getActiveLearnings, learningsPromptBlock } from "@/lib/learning";
 import { engagementScore } from "@/lib/engagement";
-import { AUDIO_MOODS, type ReelBrief, type ReelBeat } from "@/lib/reels/types";
+import { AUDIO_MOODS, type ReelBrief, type ReelBeat, type RunDirectives } from "@/lib/reels/types";
 
 const MODEL = "claude-sonnet-4-5";
 // Non-presenter (legacy image-style) reels:
@@ -16,6 +16,9 @@ const MAX_BEATS = 5;
 // Presenter narrative reels (viral ruleset V1: 60–90s total, beats of 4–8s):
 const NARRATIVE_MIN_BEATS = 9;
 const NARRATIVE_MAX_BEATS = 14;
+// Presenter loop reels (viral ruleset V1: 8–15s total, replay-engineered):
+const LOOP_MIN_BEATS = 2;
+const LOOP_MAX_BEATS = 3;
 const RECENT_POSTS = 10;
 
 type AccountRow = {
@@ -66,6 +69,8 @@ function buildPrompt(parts: {
   accountName: string;
   niche: string | null;
   presenter: boolean;
+  lengthClass: "loop" | "narrative";
+  topicHint?: string;
   personaBlock: string;
   learningsBlock: string;
   performanceBlock: string;
@@ -74,6 +79,7 @@ function buildPrompt(parts: {
   const context = [
     `Instagram account: @${parts.accountName}`,
     parts.niche ? `Account niche: ${parts.niche}` : null,
+    parts.topicHint ? `Topic direction for THIS reel (from the owner/planner): ${parts.topicHint}` : null,
     parts.personaBlock || null,
     parts.learningsBlock || null,
     parts.performanceBlock || null,
@@ -81,6 +87,14 @@ function buildPrompt(parts: {
       ? `Hooks already used recently (do NOT repeat these angles):\n${parts.recentHooks.map(h => `- ${h}`).join("\n")}`
       : null,
   ].filter(Boolean).join("\n\n");
+
+  const isLoop = parts.lengthClass === "loop";
+  const lengthRules = isLoop
+    ? `- ${LOOP_MIN_BEATS} to ${LOOP_MAX_BEATS} beats, each duration_s between 4 and 8, TOTAL duration 8–15 seconds — this is a replay-engineered LOOP reel: one single jaw-dropping idea, no slow build
+- Structure: beat 1 = avatar hook (host already mid-spectacle, premise instant), final beat = the visual payoff. Write the last voiceover line so it flows seamlessly back into the first (the reel must loop invisibly)`
+    : `- ${NARRATIVE_MIN_BEATS} to ${NARRATIVE_MAX_BEATS} beats, each duration_s between 4 and 8, TOTAL duration 60–90 seconds — this is a narrative reel that accumulates watch time
+- The LAST beat is "avatar": host wraps with the payoff + the debatable question. Middle beats alternate: roughly 40-50% broll of the event, the rest host-on-camera pushing the story forward
+- Every beat needs a voiceover_line; together they form one continuous story with the payoff held until the final 20%`;
 
   if (parts.presenter) {
     return `You are a short-form video strategist planning ONE Instagram Reel for this account, following an evidence-based viral ruleset. Format: a friendly on-camera AVATAR HOST walks viewers through ONE real, documented natural event, shot like a creator's selfie vlog. Production is fully automatic: each beat becomes one AI keyframe animated into a short vertical clip; "avatar" beats show the host speaking to camera (mouth lip-synced to the voiceover line), "broll" beats show the event/location itself with narration; word-chunk subtitles are burned on screen and music sits under everything.
@@ -118,10 +132,8 @@ Return a JSON object with EXACTLY this structure (no markdown, no code blocks):
 Rules:
 - Respond with ONLY the JSON object, no surrounding text
 - The event must be REAL and documented (no inventions). Name the real place; get the geography, climate, vegetation, and phenomenon visually right
-- ${NARRATIVE_MIN_BEATS} to ${NARRATIVE_MAX_BEATS} beats, each duration_s between 4 and 8, TOTAL duration 60–90 seconds — this is a narrative reel that accumulates watch time
+${lengthRules}
 - Beat 1 IS the hook: shot_type "avatar", the FULL premise visible instantly (host already at the extreme location, mid-action — never an intro or establishing shot), spoken hook line complete within ~2 seconds of speech
-- The LAST beat is "avatar": host wraps with the payoff + the debatable question. Middle beats alternate: roughly 40-50% broll of the event, the rest host-on-camera pushing the story forward
-- Every beat needs a voiceover_line; together they form one continuous story with the payoff held until the final 20%
 - AVATAR COMPOSITION (critical): arm's-length SELFIE-VLOG POV — the host holds the camera himself, chest-up, slight wide-angle lens feel, direct eye contact, WALKING or MOVING through the real location, background alive (wind, water, steam). Never a static tripod presenter shot
 - The host is a FICTIONAL recurring character — never base them on, compare them to, or name any real person or celebrity
 - avatar image_prompt: describe the SCENE around the host (location, weather, lighting, selfie-POV framing: chest-up, arm extended toward camera just out of frame, facing camera mid-speech). Do NOT describe the host's face or identity — the host's appearance comes from a fixed reference image. DO include the wardrobe
@@ -167,10 +179,11 @@ Rules:
 - Favor angles the performance data says worked; avoid what underperformed`;
 }
 
-function clampBrief(raw: Record<string, unknown>, presenter: boolean): ReelBrief {
+function clampBrief(raw: Record<string, unknown>, presenter: boolean, lengthClass: "loop" | "narrative"): ReelBrief {
   const beatsIn = Array.isArray(raw.beats) ? (raw.beats as Record<string, unknown>[]) : [];
-  const minBeats = presenter ? NARRATIVE_MIN_BEATS : MIN_BEATS;
-  const maxBeats = presenter ? NARRATIVE_MAX_BEATS : MAX_BEATS;
+  const isLoop = presenter && lengthClass === "loop";
+  const minBeats = presenter ? (isLoop ? LOOP_MIN_BEATS : NARRATIVE_MIN_BEATS) : MIN_BEATS;
+  const maxBeats = presenter ? (isLoop ? LOOP_MAX_BEATS : NARRATIVE_MAX_BEATS) : MAX_BEATS;
   if (beatsIn.length < minBeats) {
     throw new Error(`Brief has ${beatsIn.length} beats — need at least ${minBeats}.`);
   }
@@ -215,7 +228,7 @@ function clampBrief(raw: Record<string, unknown>, presenter: boolean): ReelBrief
     title: String(raw.title ?? "Untitled reel").trim(),
     hook: String(raw.hook ?? "").trim(),
     content_pillar: String(raw.content_pillar ?? "general").trim(),
-    length_class: presenter ? "narrative" : undefined,
+    length_class: presenter ? lengthClass : undefined,
     hook_archetype: presenter ? String(raw.hook_archetype ?? "collision").trim() : undefined,
     debatable_detail: presenter ? String(raw.debatable_detail ?? "").trim() || null : null,
     event_location: presenter ? String(raw.event_location ?? "").trim() || null : null,
@@ -230,7 +243,11 @@ function clampBrief(raw: Record<string, unknown>, presenter: boolean): ReelBrief
   };
 }
 
-export async function generateReelBrief(account: AccountRow): Promise<{ brief: ReelBrief; personaId: number | null }> {
+export async function generateReelBrief(
+  account: AccountRow,
+  directives?: RunDirectives | null
+): Promise<{ brief: ReelBrief; personaId: number | null }> {
+  const lengthClass: "loop" | "narrative" = directives?.length_class === "loop" ? "loop" : "narrative";
   const persona = await getPersonaForAccount(account.id);
   const learnings = await getActiveLearnings(account.id);
 
@@ -251,6 +268,8 @@ export async function generateReelBrief(account: AccountRow): Promise<{ brief: R
     accountName: account.account_name,
     niche: account.niche,
     presenter,
+    lengthClass,
+    topicHint: directives?.topic_hint,
     personaBlock: persona ? personaPromptBlock(persona) : "",
     learningsBlock: learningsPromptBlock(learnings),
     performanceBlock: await recentPerformanceBlock(account.id),
@@ -278,5 +297,5 @@ export async function generateReelBrief(account: AccountRow): Promise<{ brief: R
     throw new Error("Strategist returned invalid JSON.");
   }
 
-  return { brief: clampBrief(parsed, presenter), personaId: persona?.id ?? null };
+  return { brief: clampBrief(parsed, presenter, lengthClass), personaId: persona?.id ?? null };
 }
