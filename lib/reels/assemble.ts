@@ -80,17 +80,34 @@ function sanitizeSubtitle(text: string): string {
   return text.replace(/[^\w .,!?'’\-&%:;#]/g, "").trim().slice(0, 70);
 }
 
-// Wrap to two centered lines max so 60-char hooks stay readable at 1080w.
-function wrapSubtitle(text: string): string {
-  if (text.length <= 32) return text;
-  const words = text.split(" ");
-  let line1 = "";
-  for (const w of words) {
-    if ((line1 + " " + w).trim().length > Math.ceil(text.length / 2)) break;
-    line1 = (line1 + " " + w).trim();
+// V12: captions render as sequential 2–4 word chunks across the beat window
+// (karaoke-adjacent without word-level audio timing).
+function chunkSubtitle(text: string): string[] {
+  const words = text.split(/\s+/).filter(Boolean);
+  const chunks: string[] = [];
+  for (let i = 0; i < words.length; i += 3) chunks.push(words.slice(i, i + 3).join(" "));
+  // Avoid a lonely one-word final chunk — fold it into the previous (max 4 words).
+  if (chunks.length > 1 && !chunks[chunks.length - 1].includes(" ")) {
+    const last = chunks.pop() as string;
+    chunks[chunks.length - 1] += ` ${last}`;
   }
-  const line2 = text.slice(line1.length).trim();
-  return line2 ? `${line1}\n${line2}` : line1;
+  return chunks;
+}
+
+// Parses "Duration: HH:MM:SS.cc" from ffmpeg -i stderr (exits non-zero by
+// design when no output is given — we only want the probe line).
+function probeDuration(file: string): Promise<number | null> {
+  return new Promise(resolve => {
+    const proc = spawn(ffmpegBin(), ["-hide_banner", "-i", file]);
+    let stderr = "";
+    proc.stderr.on("data", d => { stderr += String(d); });
+    proc.on("error", () => resolve(null));
+    proc.on("close", () => {
+      const m = stderr.match(/Duration:\s*(\d+):(\d+):(\d+\.\d+)/);
+      if (!m) return resolve(null);
+      resolve(Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]));
+    });
+  });
 }
 
 export type AssembleInput = {
@@ -109,14 +126,25 @@ export async function assembleReel(input: AssembleInput): Promise<Buffer> {
   const work = await mkdtemp(path.join(tmpdir(), "reel-"));
 
   try {
-    // ── 1. Normalize every clip: 1080x1920, 30fps, exact beat duration, fades ──
+    // ── 1. Normalize every clip: 1080x1920, 30fps, trimmed + fades ─────────────
+    // Avatar clips (HeyGen) run exactly as long as their spoken audio — trim to
+    // the ACTUAL clip length (capped) instead of the brief's estimate, so words
+    // are never cut mid-sentence. B-roll trims to the brief duration as before.
     const normalized: { file: string; duration: number }[] = [];
     for (const clip of input.clips) {
       const beat = input.beats[clip.beatIndex];
-      const duration = Math.min(Math.max(beat?.duration_s ?? 5, 3), 6);
+      const briefDuration = Math.min(Math.max(beat?.duration_s ?? 5, 3), 8);
       const inFile = path.join(work, `in-${clip.beatIndex}.mp4`);
       const outFile = path.join(work, `norm-${clip.beatIndex}.mp4`);
       await writeFile(inFile, clip.buffer);
+
+      let duration = briefDuration;
+      if (beat?.shot_type === "avatar") {
+        const actual = await probeDuration(inFile);
+        if (actual && actual > 1) {
+          duration = Math.min(Math.max(actual - 0.05, 2), briefDuration + 2.5, 10);
+        }
+      }
 
       const fadeOutStart = Math.max(duration - FADE_S, 0);
       await runFfmpeg([
@@ -147,6 +175,8 @@ export async function assembleReel(input: AssembleInput): Promise<Buffer> {
     const filterParts: string[] = [];
     let inputIdx = 1;
 
+    // V11: caption block sits at ~58% frame height — inside Meta's unified 9:16
+    // safe zone (out of the top 270px and the bottom ~670px of 1920).
     let t = 0;
     const subWindows: { idx: number; start: number; end: number }[] = [];
     for (let i = 0; i < normalized.length; i++) {
@@ -155,20 +185,27 @@ export async function assembleReel(input: AssembleInput): Promise<Buffer> {
       const end = t + normalized[i].duration;
       t = end;
       if (!beat?.subtitle) continue;
-      const text = wrapSubtitle(sanitizeSubtitle(beat.subtitle));
-      if (!text) continue;
-      const { png } = await renderSubtitlePng(text);
-      const subFile = path.join(work, `sub-${i}.png`);
-      await writeFile(subFile, png);
-      args.push("-i", subFile);
-      subWindows.push({ idx: inputIdx++, start, end });
+      const chunks = chunkSubtitle(sanitizeSubtitle(beat.subtitle));
+      if (chunks.length === 0) continue;
+      const span = (end - start) / chunks.length;
+      for (let c = 0; c < chunks.length; c++) {
+        const { png } = await renderSubtitlePng(chunks[c]);
+        const subFile = path.join(work, `sub-${i}-${c}.png`);
+        await writeFile(subFile, png);
+        args.push("-i", subFile);
+        subWindows.push({
+          idx: inputIdx++,
+          start: start + c * span,
+          end: start + (c + 1) * span,
+        });
+      }
     }
 
     let prevLabel = "[0:v]";
     subWindows.forEach((sub, k) => {
       const out = `[ov${k}]`;
       filterParts.push(
-        `${prevLabel}[${sub.idx}:v]overlay=(W-w)/2:H*0.74:` +
+        `${prevLabel}[${sub.idx}:v]overlay=(W-w)/2:H*0.58:` +
         `enable='between(t,${sub.start.toFixed(2)},${(sub.end - 0.05).toFixed(2)})'${out}`
       );
       prevLabel = out;

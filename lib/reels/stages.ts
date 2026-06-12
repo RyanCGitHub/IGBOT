@@ -7,6 +7,8 @@ import { supabaseServer } from "@/lib/supabase-server";
 import { anthropic } from "@/lib/claude";
 import { getImageProvider, IMAGE_DAILY_CAP } from "@/lib/media-generation";
 import { submitImageToVideo, checkVideoJob, submitLipsync, checkLipsyncJob } from "@/lib/media-generation/fal";
+import { heygenEnabled, submitTalkingImage, checkHeygenVideo } from "@/lib/media-generation/heygen";
+import { estimateRunCost } from "@/lib/reels/cost";
 import { generateReelBrief } from "@/lib/reels/strategist";
 import { resolveMusic, synthesizeVoiceover, voiceoverEnabled } from "@/lib/reels/audio";
 import { assembleReel } from "@/lib/reels/assemble";
@@ -71,8 +73,19 @@ export type AdvanceResult = { from: string; to: string; note?: string };
 async function stageBrief(run: ReelRun): Promise<AdvanceResult> {
   const account = await getAccount(run.account_id);
   const { brief, personaId } = await generateReelBrief(account);
+
+  // Cost guard: nothing paid is generated for a run whose worst-case estimate
+  // exceeds REELS_MAX_COST_USD (owner-approved cap, default $12).
+  const cost = estimateRunCost(brief);
+  brief.cost_estimate = { totalUsd: cost.totalUsd, capUsd: cost.capUsd };
+  if (!cost.withinBudget) {
+    throw new Error(
+      `Cost guard: estimated $${cost.totalUsd} exceeds the $${cost.capUsd} per-reel cap — run blocked before any generation. Raise REELS_MAX_COST_USD only with manual approval.`
+    );
+  }
+
   await saveRun(run.id, { brief, persona_id: personaId, status: "briefed", error_message: null });
-  return { from: "queued", to: "briefed", note: brief.title };
+  return { from: "queued", to: "briefed", note: `${brief.title} (est $${cost.totalUsd})` };
 }
 
 // ─── Persistent avatar (presenter mode) ──────────────────────────────────────
@@ -162,7 +175,7 @@ async function stageKeyframes(run: ReelRun): Promise<AdvanceResult> {
     if (isAvatarBeat && avatar && provider.editImage) {
       // Reference-based render: same host, new scene + location-matched wardrobe.
       promptUsed = [
-        "Place this exact person (same face, same identity, same hairstyle, same facial hair) into the following scene as an on-camera host, chest-up, facing the camera mid-speech, friendly expression.",
+        "Place this exact person (same face, same identity, same hairstyle, same facial hair) into the following scene as a selfie-vlogging host: arm's-length selfie POV, chest-up, slight wide-angle feel, direct eye contact with the camera, mid-speech, friendly animated expression, clearly in motion through the location.",
         "This is a fictional recurring host — do not make them resemble any real person or celebrity.",
         brief.wardrobe ? `They are wearing: ${brief.wardrobe}` : null,
         brief.event_location ? `Location: ${brief.event_location} — the setting must look like the real place.` : null,
@@ -208,29 +221,83 @@ async function stageKeyframes(run: ReelRun): Promise<AdvanceResult> {
 }
 
 // ─── Stage: keyframes_ready → clips_generating ───────────────────────────────
+// Voiceover-first: every speaking beat gets its TTS mp3 up front, because the
+// HeyGen path consumes audio at submit time (the clip IS the lip-synced
+// performance). Routing: avatar beats → HeyGen talking-image (primary), with a
+// graceful per-beat fallback to Kling i2v (+ later lipsync) when HeyGen is
+// unconfigured or errors; broll beats → Kling i2v.
+
+async function submitBeatClip(
+  run: ReelRun,
+  brief: ReelBrief,
+  kf: Keyframe,
+  voAudioPath: string | undefined
+): Promise<Clip> {
+  const beat = brief.beats[kf.beat_index];
+  const isAvatarBeat = beat.shot_type === "avatar";
+  const base = {
+    beat_index: kf.beat_index,
+    submitted_at: new Date().toISOString(),
+    status: "submitted" as const,
+    ...(voAudioPath ? { vo_audio_path: voAudioPath } : {}),
+  };
+
+  if (isAvatarBeat && voAudioPath && heygenEnabled()) {
+    try {
+      const { videoId } = await submitTalkingImage({
+        imageUrl: kf.url,
+        audioUrl: publicUrlFor(voAudioPath),
+        motionPrompt: beat.motion_prompt,
+        title: `run-${run.id}-beat-${kf.beat_index}`,
+      });
+      return { ...base, provider: "heygen", request_id: videoId };
+    } catch (e) {
+      // Graceful fallback: this beat takes the Kling + lipsync path instead.
+      console.error(
+        `[reels/stages] HeyGen submit failed for run ${run.id} beat ${kf.beat_index} — falling back to Kling:`,
+        e instanceof Error ? e.message : e
+      );
+    }
+  }
+
+  const { requestId } = await submitImageToVideo({
+    prompt: `${beat.motion_prompt}. Style: ${brief.visual_style}`,
+    imageUrl: kf.url,
+    durationS: beat.duration_s,
+  });
+  return { ...base, provider: "kling", request_id: requestId };
+}
 
 async function stageSubmitClips(run: ReelRun): Promise<AdvanceResult> {
   const brief = run.brief as ReelBrief;
+  const account = await getAccount(run.account_id);
   const keyframes = run.keyframes as Keyframe[];
   const clips: Clip[] = [];
 
-  for (const kf of keyframes) {
-    const beat = brief.beats[kf.beat_index];
-    const { requestId } = await submitImageToVideo({
-      prompt: `${beat.motion_prompt}. Style: ${brief.visual_style}`,
-      imageUrl: kf.url,
-      durationS: beat.duration_s,
-    });
-    clips.push({
-      beat_index: kf.beat_index,
-      request_id: requestId,
-      submitted_at: new Date().toISOString(),
-      status: "submitted",
-    });
+  // 1) Voiceovers for every speaking beat (idempotent — keyed paths).
+  const voByBeat = new Map<number, string>();
+  if (account.reels_presenter_enabled) {
+    for (const kf of keyframes) {
+      const beat = brief.beats[kf.beat_index];
+      if (!beat?.voiceover_line) continue;
+      const audio = await synthesizeVoiceover(beat.voiceover_line, account.reels_voice_instructions);
+      const upload = await uploadToBucket(`reels/${run.id}/vo-${kf.beat_index}.mp3`, audio, "audio/mpeg");
+      voByBeat.set(kf.beat_index, upload.path);
+    }
   }
 
+  // 2) Clip jobs, provider-routed.
+  for (const kf of keyframes) {
+    clips.push(await submitBeatClip(run, brief, kf, voByBeat.get(kf.beat_index)));
+  }
+
+  const heygenCount = clips.filter(c => c.provider === "heygen").length;
   await saveRun(run.id, { clips, status: "clips_generating", error_message: null });
-  return { from: "keyframes_ready", to: "clips_generating", note: `${clips.length} video jobs submitted` };
+  return {
+    from: "keyframes_ready",
+    to: "clips_generating",
+    note: `${clips.length} clip jobs (${heygenCount} heygen, ${clips.length - heygenCount} kling)`,
+  };
 }
 
 // ─── Stage: clips_generating → clips_ready ───────────────────────────────────
@@ -246,7 +313,10 @@ async function stageCollectClips(run: ReelRun): Promise<AdvanceResult> {
   for (const clip of clips) {
     if (clip.status === "done") continue;
 
-    const check = await checkVideoJob(clip.request_id);
+    const check = clip.provider === "heygen"
+      ? await checkHeygenVideo(clip.request_id)
+      : await checkVideoJob(clip.request_id);
+
     if (check.status === "done") {
       const buffer = await fetchToBuffer(check.videoUrl);
       const upload = await uploadToBucket(`reels/${run.id}/clip-${clip.beat_index}.mp4`, buffer, "video/mp4");
@@ -254,17 +324,19 @@ async function stageCollectClips(run: ReelRun): Promise<AdvanceResult> {
       clip.provider_url = check.videoUrl;
       clip.storage_path = upload.path;
       clip.url = upload.publicUrl;
+      // A HeyGen talking-image clip is already mouth-matched to its audio.
+      if (clip.provider === "heygen") clip.lipsynced = true;
       await saveRun(run.id, { clips });
     } else if (check.status === "failed") {
       clip.status = "failed";
       clip.error = check.error;
-      failures.push(`beat ${clip.beat_index}: ${check.error}`);
+      failures.push(`beat ${clip.beat_index} (${clip.provider ?? "kling"}): ${check.error}`);
     } else {
       const ageMin = (Date.now() - new Date(clip.submitted_at).getTime()) / 60_000;
       if (ageMin > CLIP_TIMEOUT_MIN) {
         clip.status = "failed";
         clip.error = `provider job stale after ${Math.round(ageMin)} min`;
-        failures.push(`beat ${clip.beat_index}: stale job`);
+        failures.push(`beat ${clip.beat_index} (${clip.provider ?? "kling"}): stale job`);
       }
     }
   }
@@ -272,6 +344,8 @@ async function stageCollectClips(run: ReelRun): Promise<AdvanceResult> {
   if (failures.length > 0) {
     // Resubmit failed beats now so the retry is already in flight, then throw
     // so the tick's attempt accounting applies (MAX_ATTEMPTS strikes → failed).
+    // A failed HeyGen clip falls back to Kling i2v — the lipsync stage will
+    // mouth-match it afterwards.
     for (const clip of clips) {
       if (clip.status !== "failed") continue;
       const kf = keyframes.find(k => k.beat_index === clip.beat_index);
@@ -282,9 +356,11 @@ async function stageCollectClips(run: ReelRun): Promise<AdvanceResult> {
         imageUrl: kf.url,
         durationS: beat.duration_s,
       });
+      clip.provider = "kling";
       clip.request_id = requestId;
       clip.submitted_at = new Date().toISOString();
       clip.status = "submitted";
+      clip.lipsynced = false;
       clip.error = undefined;
     }
     await saveRun(run.id, { clips });
@@ -495,21 +571,27 @@ async function stageCaption(run: ReelRun): Promise<AdvanceResult> {
     max_tokens: 1_000,
     messages: [{
       role: "user",
-      content: `Write the Instagram caption for this Reel.
+      content: `Write the Instagram caption for this Reel, following an evidence-based viral ruleset.
 
 ${context}
+${brief.debatable_detail ? `- Debatable detail to spark comments: ${brief.debatable_detail}` : ""}
 
 Return a JSON object with EXACTLY this structure (no markdown, no code blocks):
 
 {
-  "caption": "the full caption: hook line first, 2-4 short lines, the CTA last. No hashtags here.",
-  "hashtags": "#tag1 #tag2 ... (8-15 hashtags tuned to this account and reel)"
+  "caption": "the full caption. No hashtags here.",
+  "hashtags": "#tag1 #tag2 #tag3 (3-5 hashtags total: 1 broad topic, 2-3 niche/event-specific)"
 }
 
-Rules:
+Caption rules (follow exactly):
 - Respond with ONLY the JSON object
-- First line must work as a standalone hook (it shows before "... more")
-- Match the account voice exactly; no generic AI filler phrases`,
+- Total caption length 100-150 words
+- LINE 1: a keyword-bearing re-hook — write it as the exact search phrase + stakes a target viewer would respond to (it is the only line shown before "... more"). Never start with an emoji
+- BODY: 2-4 short lines adding ONE true fact that is NOT in the video (reward for expanding the caption)
+- Include the debatable question to invite comments — phrased genuinely, answerable in a few words
+- FINAL LINE: one save- or share-oriented CTA (e.g. "Save this for your next trivia night" / "Send this to the friend who'd survive it"). NEVER "like if", "comment YES", or any mechanical engagement bait
+- Match the account voice exactly; no generic AI filler phrases
+- 3-5 hashtags only — never more`,
     }],
   });
 
