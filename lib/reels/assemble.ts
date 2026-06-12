@@ -46,9 +46,37 @@ function runFfmpeg(args: string[]): Promise<void> {
     proc.on("close", code => {
       clearTimeout(timer);
       if (code === 0) resolve();
-      else reject(new Error(`ffmpeg exited ${code}: ${stderr.slice(-800)}`));
+      else {
+        // Full stderr to runtime logs — the decisive line ("No such filter:
+        // 'x'") is at the HEAD, which a tail-only message would drop.
+        console.error(`[reels/assemble] ffmpeg exited ${code}. stderr:\n${stderr.slice(0, 4000)}`);
+        reject(new Error(`ffmpeg exited ${code}: ${stderr.slice(0, 300)} … ${stderr.slice(-300)}`));
+      }
     });
   });
+}
+
+// Logs which of the filters we rely on are missing from this binary's
+// registry. Runs once per assembly — cheap, and decisive when builds differ
+// per platform (the linux ffmpeg-static build has bitten us already).
+const REQUIRED_FILTERS = ["drawtext", "adelay", "afade", "amix", "apad", "anull", "null", "scale", "crop", "fps", "fade", "format", "concat"];
+
+async function logMissingFilters(): Promise<void> {
+  try {
+    const list = await new Promise<string>((resolve, reject) => {
+      const proc = spawn(ffmpegBin(), ["-hide_banner", "-filters"]);
+      let out = "";
+      proc.stdout.on("data", d => { out += String(d); });
+      proc.on("error", reject);
+      proc.on("close", () => resolve(out));
+    });
+    const missing = REQUIRED_FILTERS.filter(f => !new RegExp(`\\s${f}\\s`).test(list));
+    if (missing.length > 0) {
+      console.error(`[reels/assemble] MISSING FILTERS in this ffmpeg build: ${missing.join(", ")}`);
+    }
+  } catch (e) {
+    console.error("[reels/assemble] could not enumerate filters:", e instanceof Error ? e.message : e);
+  }
 }
 
 // Subtitles go through textfile= (not inline text=) so the filter parser never
@@ -82,6 +110,7 @@ export type AssembleInput = {
 
 export async function assembleReel(input: AssembleInput): Promise<Buffer> {
   if (input.clips.length === 0) throw new Error("No clips to assemble.");
+  await logMissingFilters();
   const work = await mkdtemp(path.join(tmpdir(), "reel-"));
 
   try {
