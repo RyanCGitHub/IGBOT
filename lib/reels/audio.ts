@@ -74,7 +74,9 @@ export function voiceoverEnabled(): boolean {
   return process.env.REELS_VOICEOVER_ENABLED !== "false";
 }
 
-export async function synthesizeVoiceover(script: string): Promise<Buffer> {
+// `instructions` shapes delivery (accent, energy, persona) — gpt-4o-mini-tts
+// follows them; stored per account in connected_accounts.reels_voice_instructions.
+export async function synthesizeVoiceover(script: string, instructions?: string | null): Promise<Buffer> {
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new Error("OPENAI_API_KEY is not set on the server.");
 
@@ -88,6 +90,7 @@ export async function synthesizeVoiceover(script: string): Promise<Buffer> {
       model: process.env.REELS_TTS_MODEL || "gpt-4o-mini-tts",
       voice: process.env.REELS_TTS_VOICE || "alloy",
       input: script,
+      ...(instructions?.trim() ? { instructions: instructions.trim() } : {}),
       response_format: "mp3",
     }),
   });

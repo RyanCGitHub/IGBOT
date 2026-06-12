@@ -7,7 +7,8 @@ export type ReelRunStatus =
   | "briefed"           // structured brief generated
   | "keyframes_ready"   // every beat has a stored keyframe image
   | "clips_generating"  // video jobs submitted to the provider, awaiting completion
-  | "clips_ready"       // all clips downloaded into our storage bucket
+  | "lipsyncing"        // presenter mode: avatar clips being mouth-matched to voiceover
+  | "clips_ready"       // all clips (lip-synced where needed) in our storage bucket
   | "assembled"         // final MP4 (subtitles + audio) in storage
   | "captioned"         // caption + hashtags written, scheduled_for set
   | "publishing"        // REELS container created, polling until FINISHED
@@ -20,6 +21,7 @@ export const ACTIVE_STATUSES: ReelRunStatus[] = [
   "briefed",
   "keyframes_ready",
   "clips_generating",
+  "lipsyncing",
   "clips_ready",
   "assembled",
   "captioned",
@@ -33,16 +35,23 @@ export type ReelBeat = {
   image_prompt: string;   // keyframe prompt for the image provider
   motion_prompt: string;  // camera/subject motion for image-to-video
   duration_s: number;     // 3–6 seconds
+  // Presenter mode only:
+  shot_type?: "avatar" | "broll";  // avatar = host on camera (lip-synced); broll = event footage
+  voiceover_line?: string | null;  // what the host says during this beat
 };
 
 export type ReelBrief = {
   title: string;
   hook: string;
   content_pillar: string;
+  // Presenter mode: the real documented event + where it happened (drives
+  // location-accurate visuals and the host's wardrobe).
+  event_location?: string | null;
+  wardrobe?: string | null;
   beats: ReelBeat[];
   visual_style: string;
   audio_mood: string;             // one of AUDIO_MOODS
-  voiceover_script: string | null; // null → no voiceover for this reel
+  voiceover_script: string | null; // non-presenter reels: single narration track
   caption_angle: string;
   hashtags: string;
   cta: string;
@@ -63,6 +72,11 @@ export type Clip = {
   storage_path?: string;         // after download into our bucket
   url?: string;                  // our public URL
   error?: string;
+  // Presenter mode (avatar beats only):
+  vo_audio_path?: string;        // this beat's voiceover mp3 in storage
+  lipsync_request_id?: string;   // queue id of the lip-sync job
+  lipsync_submitted_at?: string;
+  lipsynced?: boolean;           // storage clip replaced with mouth-matched version
 };
 
 export type ReelRunAudio = {

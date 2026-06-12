@@ -65,6 +65,36 @@ Optional:
 - `REELS_DEFAULT_POST_HOUR_UTC` (default 17) — used when the account has no `posting_hour_utc`
 - `REELS_PUBLISH_IMMEDIATELY` — `true` publishes as soon as a reel is ready (useful for testing)
 
+## Presenter (avatar host) mode
+
+Per-account toggle: `connected_accounts.reels_presenter_enabled`. When on, the
+reel format changes from "footage + narration" to **an on-camera AI host**:
+
+- **One persistent avatar per account** — designed by AI from the account's
+  persona/niche on first run, stored at `reels_avatar_path`, and reused as the
+  reference image (`gpt-image-1` images/edits) for every avatar shot, which is
+  what keeps the face consistent across reels. Delete the storage file + null
+  the column to force a new look.
+- **Brief format** — one real, documented natural event per reel
+  (`event_location` names the real place/year); beats are typed `avatar`
+  (host on camera, opens and closes the reel) or `broll` (the event itself,
+  visually matched to the real location); the host's `wardrobe` matches the
+  location/climate.
+- **Lip sync** — each avatar clip + its beat's voiceover line goes through the
+  fal.ai lip-sync model (`FAL_LIPSYNC_MODEL`, default `fal-ai/sync-lipsync`) so
+  mouth movement matches the words; the same mp3 is then placed at the beat's
+  exact offset in the final mix.
+- **Voice** — `connected_accounts.reels_voice_instructions` carries delivery
+  instructions (e.g. "warm, friendly Australian accent") passed to
+  `gpt-4o-mini-tts` per line.
+- New pipeline stage: `clips_ready → lipsyncing → clips_ready → assembled`.
+
+Honest limits: lip-sync quality varies per model/clip; "location accuracy" is
+prompt-enforced (the strategist must use real documented events and the image
+prompts name the real place) but generative models can still get details wrong
+— the learning engine will surface what audiences reject. Cost per reel rises
+by roughly $0.05–0.15 per avatar beat (TTS + lip-sync inference).
+
 ## Audio rights — read this
 
 **The pipeline never uses Instagram's licensed/"trending" audio.** The Content
