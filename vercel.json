@@ -15,6 +15,10 @@
     {
       "path": "/api/reels/measure",
       "schedule": "30 6 * * *"
+    },
+    {
+      "path": "/api/media-network/ingest-news",
+      "schedule": "*/30 * * * *"
     }
   ]
 }

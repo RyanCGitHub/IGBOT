@@ -5,6 +5,7 @@ import Link from "next/link";
 import { apiFetch } from "@/lib/api-fetch";
 import BrandNetwork from "@/app/components/media-network/BrandNetwork";
 import SourceManager from "@/app/components/media-network/SourceManager";
+import NewsDesk from "@/app/components/media-network/NewsDesk";
 
 // Media Network — the newsroom. Owner's no-clutter rule: KPI strip on top,
 // ONE desk visible at a time via tabs, everything else stays off-screen.
@@ -120,7 +121,7 @@ export default function MediaNetworkPage() {
         {/* Active desk */}
         {tab === "brands" && <BrandNetwork />}
         {tab === "sources" && <SourceManager />}
-        {tab === "news" && <ComingSoon phase="Phase 3 (News Desk)" />}
+        {tab === "news" && <NewsDesk />}
         {tab === "clips" && <ComingSoon phase="Phase 4 (Clip Desk)" />}
         {tab === "packages" && <ComingSoon phase="Phase 5 (Content Packages)" />}
         {tab === "performance" && <ComingSoon phase="Phase 7 (Performance Lab)" />}
