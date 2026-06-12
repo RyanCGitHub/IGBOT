@@ -162,6 +162,9 @@ export async function assembleReel(input: AssembleInput): Promise<Buffer> {
       }
     }
 
+    // NOTE: the `volume` filter is deliberately never used — the ffmpeg-static
+    // LINUX build ships without it (the darwin build has it, so local tests
+    // pass either way). Gain staging is done via amix `weights` instead.
     const voLabels: string[] = [];
     for (let k = 0; k < input.voiceovers.length; k++) {
       const vo = input.voiceovers[k];
@@ -170,26 +173,28 @@ export async function assembleReel(input: AssembleInput): Promise<Buffer> {
       args.push("-i", voFile);
       const idx = inputIdx++;
       const delayMs = Math.round((offsetByBeat.get(vo.beatIndex) ?? 0) * 1000);
-      filterParts.push(`[${idx}:a]volume=1.0,adelay=${delayMs}:all=1[vo${k}]`);
+      filterParts.push(`[${idx}:a]adelay=${delayMs}:all=1[vo${k}]`);
       voLabels.push(`[vo${k}]`);
     }
 
     const fadeOut = `afade=t=out:st=${Math.max(totalDuration - 1, 0).toFixed(2)}:d=1`;
     if (musicIdx >= 0 && voLabels.length > 0) {
-      // Duck the music well under the speech; normalize=0 keeps voices at
-      // full level instead of amix's default 1/N attenuation.
+      // Music ducked to 0.22 under speech via amix weights (music is the first
+      // input); normalize=0 keeps voices at full level instead of 1/N.
+      const weights = ["0.22", ...voLabels.map(() => "1")].join(" ");
       filterParts.push(
-        `[${musicIdx}:a]volume=0.22,${fadeOut}[m]`,
-        `[m]${voLabels.join("")}amix=inputs=${voLabels.length + 1}:duration=longest:dropout_transition=0:normalize=0[a]`
+        `[${musicIdx}:a]${fadeOut}[m]`,
+        `[m]${voLabels.join("")}amix=inputs=${voLabels.length + 1}:duration=longest:dropout_transition=0:normalize=0:weights='${weights}'[a]`
       );
       audioMap = "[a]";
     } else if (musicIdx >= 0) {
-      filterParts.push(`[${musicIdx}:a]volume=0.9,${fadeOut}[a]`);
+      // Solo music slightly tamed via single-input amix weight.
+      filterParts.push(`[${musicIdx}:a]${fadeOut},amix=inputs=1:normalize=0:weights='0.9'[a]`);
       audioMap = "[a]";
     } else if (voLabels.length > 0) {
       filterParts.push(
         voLabels.length === 1
-          ? `${voLabels[0]}volume=1.0,apad[a]`
+          ? `${voLabels[0]}apad[a]`
           : `${voLabels.join("")}amix=inputs=${voLabels.length}:duration=longest:dropout_transition=0:normalize=0,apad[a]`
       );
       audioMap = "[a]";
