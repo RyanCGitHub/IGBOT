@@ -115,7 +115,7 @@ Return a JSON object with EXACTLY this structure (no markdown, no code blocks):
   "beats": [
     {
       "shot_type": "avatar or broll",
-      "voiceover_line": "what the host says during this beat, spoken language, ~2.5 words per second of the beat (a 6s beat = max 15 words)",
+      "voiceover_line": "what the host says during this beat — a COMPLETE sentence (or two short ones), spoken language. HARD LIMIT: 2.5 words per second of the beat (6s beat = 15 words MAX — count them; lines over budget get machine-trimmed and ruined)",
       "subtitle": "on-screen text, max 60 characters. MUST NOT repeat the voiceover line word-for-word — the overlay is the curiosity gap, the voice is the story",
       "image_prompt": "detailed visual description of the keyframe. Vertical 9:16.",
       "motion_prompt": "how the shot moves (camera + subject), one sentence",
@@ -190,6 +190,37 @@ Rules:
 - Favor angles the performance data says worked; avoid what underperformed`;
 }
 
+// Words that must never end a spoken line (mid-thought cutoff tells).
+const DANGLING = new Set(["a", "an", "the", "and", "or", "but", "with", "near", "to", "of", "in", "on", "at", "for", "so", "that", "than", "—", "-"]);
+
+function trimSpokenLine(line: string, maxWords: number): string {
+  const words = line.split(/\s+/);
+  if (words.length <= maxWords) return line;
+
+  const clipped = words.slice(0, maxWords).join(" ");
+
+  // Best cut: last full sentence inside the budget.
+  const sentenceEnd = Math.max(clipped.lastIndexOf("."), clipped.lastIndexOf("!"), clipped.lastIndexOf("?"));
+  if (sentenceEnd > clipped.length * 0.4) return clipped.slice(0, sentenceEnd + 1);
+
+  // Next best: last clause boundary (dash/comma/semicolon) — "X — and it's
+  // nowhere" becomes "X." instead of a mid-thought cutoff.
+  const clauseEnd = Math.max(
+    clipped.lastIndexOf("—"), clipped.lastIndexOf("–"),
+    clipped.lastIndexOf(","), clipped.lastIndexOf(";")
+  );
+  if (clauseEnd > clipped.length * 0.4) {
+    return clipped.slice(0, clauseEnd).trim().replace(/[,;:—–-]+$/, "") + ".";
+  }
+
+  // Last resort: word trim + drop dangling connectives/articles.
+  const kept = words.slice(0, maxWords);
+  while (kept.length > 3 && DANGLING.has(kept[kept.length - 1].toLowerCase().replace(/[^\w—-]/g, ""))) {
+    kept.pop();
+  }
+  return kept.join(" ").replace(/[,;:—–-]+$/, "") + ".";
+}
+
 function clampBrief(raw: Record<string, unknown>, presenter: boolean, lengthClass: "loop" | "narrative"): ReelBrief {
   const beatsIn = Array.isArray(raw.beats) ? (raw.beats as Record<string, unknown>[]) : [];
   const isLoop = presenter && lengthClass === "loop";
@@ -217,9 +248,13 @@ function clampBrief(raw: Record<string, unknown>, presenter: boolean, lengthClas
       beat.shot_type = b.shot_type === "avatar" ? "avatar" : "broll";
       const line = String(b.voiceover_line ?? "").trim();
       if (!line) throw new Error(`Beat ${i + 1} is missing voiceover_line (required in presenter mode).`);
-      // V13 word budget: ~2.5 words/sec of beat time (+ small grace).
-      const maxWords = Math.ceil(duration_s * 2.8);
-      beat.voiceover_line = line.split(/\s+/).slice(0, maxWords).join(" ");
+      // V13 word budget. Avatar clips stretch to their audio (+~2s grace in
+      // assembly), so they get a looser budget; broll narration must fit the
+      // beat strictly. NEVER cut mid-sentence — trim at a sentence boundary,
+      // and as a last resort strip trailing dangling words so the line still
+      // ends cleanly (a clipped "...nowhere near a" reads as a defect).
+      const budgetSeconds = beat.shot_type === "avatar" ? duration_s + 2 : duration_s;
+      beat.voiceover_line = trimSpokenLine(line, Math.ceil(budgetSeconds * 2.8));
     }
     return beat;
   });
