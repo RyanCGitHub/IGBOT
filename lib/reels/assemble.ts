@@ -74,7 +74,10 @@ export type AssembleInput = {
   clips: { beatIndex: number; buffer: Buffer }[]; // ordered by beatIndex
   beats: ReelBeat[];
   music: Buffer | null;
-  voiceover: Buffer | null;
+  // Voiceover segments placed at their beat's offset in the timeline. A single
+  // full-length narration is just one entry at beatIndex 0. For lip-synced
+  // avatar beats this must be the same audio the lip-sync ran against.
+  voiceovers: { beatIndex: number; buffer: Buffer }[];
 };
 
 export async function assembleReel(input: AssembleInput): Promise<Buffer> {
@@ -148,28 +151,47 @@ export async function assembleReel(input: AssembleInput): Promise<Buffer> {
       args.push("-stream_loop", "-1", "-i", musicFile); // loop if shorter than video
       musicIdx = inputIdx++;
     }
-    let voIdx = -1;
-    if (input.voiceover) {
-      const voFile = path.join(work, "voiceover.mp3");
-      await writeFile(voFile, input.voiceover);
+
+    // Beat start offsets in the concatenated timeline (clip order = beat order).
+    const offsetByBeat = new Map<number, number>();
+    {
+      let acc = 0;
+      for (let i = 0; i < input.clips.length; i++) {
+        offsetByBeat.set(input.clips[i].beatIndex, acc);
+        acc += normalized[i].duration;
+      }
+    }
+
+    const voLabels: string[] = [];
+    for (let k = 0; k < input.voiceovers.length; k++) {
+      const vo = input.voiceovers[k];
+      const voFile = path.join(work, `vo-${vo.beatIndex}.mp3`);
+      await writeFile(voFile, vo.buffer);
       args.push("-i", voFile);
-      voIdx = inputIdx++;
+      const idx = inputIdx++;
+      const delayMs = Math.round((offsetByBeat.get(vo.beatIndex) ?? 0) * 1000);
+      filterParts.push(`[${idx}:a]volume=1.0,adelay=${delayMs}:all=1[vo${k}]`);
+      voLabels.push(`[vo${k}]`);
     }
 
     const fadeOut = `afade=t=out:st=${Math.max(totalDuration - 1, 0).toFixed(2)}:d=1`;
-    if (musicIdx >= 0 && voIdx >= 0) {
-      // Duck the music well under the voiceover.
+    if (musicIdx >= 0 && voLabels.length > 0) {
+      // Duck the music well under the speech; normalize=0 keeps voices at
+      // full level instead of amix's default 1/N attenuation.
       filterParts.push(
         `[${musicIdx}:a]volume=0.22,${fadeOut}[m]`,
-        `[${voIdx}:a]volume=1.0,apad[vo]`,
-        `[m][vo]amix=inputs=2:duration=first:dropout_transition=0[a]`
+        `[m]${voLabels.join("")}amix=inputs=${voLabels.length + 1}:duration=longest:dropout_transition=0:normalize=0[a]`
       );
       audioMap = "[a]";
     } else if (musicIdx >= 0) {
       filterParts.push(`[${musicIdx}:a]volume=0.9,${fadeOut}[a]`);
       audioMap = "[a]";
-    } else if (voIdx >= 0) {
-      filterParts.push(`[${voIdx}:a]volume=1.0,apad[a]`);
+    } else if (voLabels.length > 0) {
+      filterParts.push(
+        voLabels.length === 1
+          ? `${voLabels[0]}volume=1.0,apad[a]`
+          : `${voLabels.join("")}amix=inputs=${voLabels.length}:duration=longest:dropout_transition=0:normalize=0,apad[a]`
+      );
       audioMap = "[a]";
     } else {
       // Instagram is happiest with an audio stream present — add silence.

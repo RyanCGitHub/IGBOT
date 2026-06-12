@@ -15,6 +15,13 @@ export type GeneratedImageResult = {
 export interface ImageProvider {
   readonly name: string;
   generateImage(prompt: string, options?: GenerateImageOptions): Promise<GeneratedImageResult>;
+  // Reference-based generation (e.g. OpenAI images/edits): renders a new scene
+  // that keeps the subject of the reference image — used for avatar consistency.
+  editImage?(
+    prompt: string,
+    reference: { buffer: Buffer; mimeType: string },
+    options?: GenerateImageOptions
+  ): Promise<GeneratedImageResult>;
 }
 
 // ─── Video (stub only — not implemented until MEDIA_VIDEO_ENABLED + a real provider) ─

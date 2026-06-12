@@ -102,6 +102,71 @@ export async function checkVideoJob(requestId: string): Promise<VideoJobCheck> {
   return { status: "done", videoUrl: url };
 }
 
+// ─── Lip sync (queue) ────────────────────────────────────────────────────────
+// Re-times an avatar clip's mouth movement to a voiceover track. Same queue
+// pattern as image-to-video: submit returns a request id stored on the run,
+// later ticks poll. Default model takes {video_url, audio_url}.
+
+const DEFAULT_LIPSYNC_MODEL = "fal-ai/sync-lipsync";
+
+function lipsyncModel(): string {
+  return process.env.FAL_LIPSYNC_MODEL || DEFAULT_LIPSYNC_MODEL;
+}
+
+export async function submitLipsync(params: {
+  videoUrl: string;
+  audioUrl: string;
+}): Promise<{ requestId: string }> {
+  const res = await fetch(`${FAL_QUEUE_URL}/${lipsyncModel()}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Key ${falKey()}`,
+    },
+    body: JSON.stringify({
+      video_url: params.videoUrl,
+      audio_url: params.audioUrl,
+      // If the audio runs past the clip, cut rather than loop the footage.
+      sync_mode: "cut_off",
+    }),
+  });
+
+  const data = (await res.json()) as { request_id?: string } & FalError;
+  if (!res.ok || !data.request_id) {
+    throw new Error(`Lipsync job submit failed: ${falErrorMessage(data, res.status)}`);
+  }
+  return { requestId: data.request_id };
+}
+
+export async function checkLipsyncJob(requestId: string): Promise<VideoJobCheck> {
+  const base = `${FAL_QUEUE_URL}/${appId(lipsyncModel())}/requests/${requestId}`;
+  const headers = { Authorization: `Key ${falKey()}` };
+
+  const statusRes = await fetch(`${base}/status`, { headers });
+  const statusData = (await statusRes.json()) as { status?: string } & FalError;
+
+  if (!statusRes.ok) {
+    if (statusRes.status >= 400 && statusRes.status < 500) {
+      return { status: "failed", error: falErrorMessage(statusData, statusRes.status) };
+    }
+    return { status: "pending" };
+  }
+  if (statusData.status === "IN_QUEUE" || statusData.status === "IN_PROGRESS") {
+    return { status: "pending" };
+  }
+  if (statusData.status !== "COMPLETED") {
+    return { status: "failed", error: `Lipsync job ended with status ${statusData.status ?? "unknown"}` };
+  }
+
+  const resultRes = await fetch(base, { headers });
+  const resultData = (await resultRes.json()) as { video?: { url?: string } } & FalError;
+  const url = resultData.video?.url;
+  if (!resultRes.ok || !url) {
+    return { status: "failed", error: `Lipsync completed but returned no video: ${falErrorMessage(resultData, resultRes.status)}` };
+  }
+  return { status: "done", videoUrl: url };
+}
+
 // ─── Generated music (sync — stable-audio renders in seconds) ────────────────
 // Rights-safe soundtrack source: the model generates an original instrumental,
 // so there is no licensing problem (unlike Instagram's trending audio, which

@@ -10,7 +10,7 @@ import type { ReelsAccountSettings, ReelRunView } from "@/lib/supabase";
 
 const STAGE_ORDER = [
   "queued", "briefed", "keyframes_ready", "clips_generating",
-  "clips_ready", "assembled", "captioned", "publishing", "published",
+  "lipsyncing", "clips_ready", "assembled", "captioned", "publishing", "published",
 ];
 
 const STAGE_LABELS: Record<string, string> = {
@@ -18,6 +18,7 @@ const STAGE_LABELS: Record<string, string> = {
   briefed: "Brief ready",
   keyframes_ready: "Keyframes ready",
   clips_generating: "Generating clips",
+  lipsyncing: "Lip-syncing host",
   clips_ready: "Clips ready",
   assembled: "Video assembled",
   captioned: "Awaiting slot",

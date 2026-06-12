@@ -6,7 +6,7 @@
 import { supabaseServer } from "@/lib/supabase-server";
 import { anthropic } from "@/lib/claude";
 import { getImageProvider, IMAGE_DAILY_CAP } from "@/lib/media-generation";
-import { submitImageToVideo, checkVideoJob } from "@/lib/media-generation/fal";
+import { submitImageToVideo, checkVideoJob, submitLipsync, checkLipsyncJob } from "@/lib/media-generation/fal";
 import { generateReelBrief } from "@/lib/reels/strategist";
 import { resolveMusic, synthesizeVoiceover, voiceoverEnabled } from "@/lib/reels/audio";
 import { assembleReel } from "@/lib/reels/assemble";
@@ -36,16 +36,24 @@ type AccountRow = {
   access_token: string;
   niche: string | null;
   posting_hour_utc: number | null;
+  reels_presenter_enabled: boolean;
+  reels_avatar_path: string | null;
+  reels_avatar_prompt: string | null;
+  reels_voice_instructions: string | null;
 };
 
 async function getAccount(accountId: number): Promise<AccountRow> {
   const { data, error } = await supabaseServer
     .from("connected_accounts")
-    .select("id, account_name, ig_user_id, access_token, niche, posting_hour_utc")
+    .select(
+      "id, account_name, ig_user_id, access_token, niche, posting_hour_utc, " +
+      "reels_presenter_enabled, reels_avatar_path, reels_avatar_prompt, reels_voice_instructions"
+    )
     .eq("id", accountId)
     .single();
   if (error || !data) throw new Error(`Connected account ${accountId} not found — was it disconnected?`);
-  return data as AccountRow;
+  // Cast via unknown: supabase-js can't type-parse a concatenated select string.
+  return data as unknown as AccountRow;
 }
 
 async function saveRun(id: number, patch: Record<string, unknown>): Promise<void> {
@@ -67,12 +75,55 @@ async function stageBrief(run: ReelRun): Promise<AdvanceResult> {
   return { from: "queued", to: "briefed", note: brief.title };
 }
 
+// ─── Persistent avatar (presenter mode) ──────────────────────────────────────
+// One avatar per account, generated once and reused as the reference image for
+// every avatar keyframe — that reuse is what keeps the host's face consistent.
+// The look is AI-designed from the account's persona/niche plus fixed traits.
+
+async function ensureAvatar(account: AccountRow): Promise<{ buffer: Buffer; mimeType: string }> {
+  if (account.reels_avatar_path) {
+    return { buffer: await downloadFromBucket(account.reels_avatar_path), mimeType: "image/png" };
+  }
+
+  const persona = await getPersonaForAccount(account.id);
+  const prompt = [
+    "Design the single recurring on-camera host for this short-form nature channel.",
+    "A friendly, warm, approachable presenter with an open smile, looking straight into the camera,",
+    "chest-up portrait, soft natural outdoor lighting, photorealistic, neutral outdoor backdrop.",
+    "Practical outdoor field clothing. No text, no logos, no watermark.",
+    persona?.visual_style ? `Channel visual style: ${persona.visual_style}` : null,
+    account.niche ? `Channel niche: ${account.niche}` : null,
+  ].filter(Boolean).join("\n");
+
+  const provider = getImageProvider();
+  const result = await provider.generateImage(prompt, { size: "1024x1536" });
+  const upload = await uploadToBucket(
+    `reels/avatars/account-${account.id}.png`,
+    Buffer.from(result.base64, "base64"),
+    result.mimeType
+  );
+
+  const { error } = await supabaseServer
+    .from("connected_accounts")
+    .update({ reels_avatar_path: upload.path, reels_avatar_prompt: prompt })
+    .eq("id", account.id);
+  if (error) throw new Error(`Could not save avatar for account ${account.id}: ${error.message}`);
+
+  console.log(`[reels/avatar] generated persistent avatar for @${account.account_name} → ${upload.path}`);
+  return { buffer: Buffer.from(result.base64, "base64"), mimeType: "image/png" };
+}
+
 // ─── Stage: briefed → keyframes_ready ────────────────────────────────────────
 // One gpt-image-1 portrait keyframe per beat, time-budgeted: generates as many
 // as fit in this tick and stays in "briefed" until every beat has one.
+// Presenter mode: avatar beats are rendered via images/edits with the account's
+// avatar as the reference so the host looks identical in every shot.
 
 async function stageKeyframes(run: ReelRun): Promise<AdvanceResult> {
   const brief = run.brief as ReelBrief;
+  const account = await getAccount(run.account_id);
+  const presenter = account.reels_presenter_enabled;
+  const avatar = presenter ? await ensureAvatar(account) : null;
   const provider = getImageProvider();
   const started = Date.now();
   const keyframes: Keyframe[] = [...(run.keyframes ?? [])];
@@ -99,9 +150,30 @@ async function stageKeyframes(run: ReelRun): Promise<AdvanceResult> {
     }
 
     const beat = brief.beats[i];
-    const prompt = [brief.visual_style, beat.image_prompt, "Vertical 9:16 composition. No text or lettering in the image."]
-      .filter(Boolean).join("\n\n");
-    const result = await provider.generateImage(prompt, { size: "1024x1536" });
+    const isAvatarBeat = presenter && beat.shot_type === "avatar";
+
+    let result;
+    let promptUsed: string;
+    if (isAvatarBeat && avatar && provider.editImage) {
+      // Reference-based render: same host, new scene + location-matched wardrobe.
+      promptUsed = [
+        "Place this exact person (same face, same identity) into the following scene as an on-camera host, chest-up, facing the camera mid-speech, friendly expression.",
+        brief.wardrobe ? `They are wearing: ${brief.wardrobe}` : null,
+        brief.event_location ? `Location: ${brief.event_location} — the setting must look like the real place.` : null,
+        beat.image_prompt,
+        brief.visual_style,
+        "Vertical 9:16 composition. No text or lettering in the image.",
+      ].filter(Boolean).join("\n\n");
+      result = await provider.editImage(promptUsed, avatar, { size: "1024x1536" });
+    } else {
+      promptUsed = [
+        brief.visual_style,
+        brief.event_location ? `Real location: ${brief.event_location} — geography, vegetation, and weather must match the real place.` : null,
+        beat.image_prompt,
+        "Vertical 9:16 composition. No text or lettering in the image.",
+      ].filter(Boolean).join("\n\n");
+      result = await provider.generateImage(promptUsed, { size: "1024x1536" });
+    }
     capRemaining--;
 
     const upload = await uploadToBucket(
@@ -116,7 +188,7 @@ async function stageKeyframes(run: ReelRun): Promise<AdvanceResult> {
     await supabaseServer.from("generated_media").insert({
       account_id: run.account_id,
       persona_id: run.persona_id,
-      prompt_used: prompt,
+      prompt_used: promptUsed,
       provider: provider.name,
       storage_path: upload.path,
       media_type: "image",
@@ -222,10 +294,119 @@ async function stageCollectClips(run: ReelRun): Promise<AdvanceResult> {
   return { from: "clips_generating", to: "clips_generating", note: `clips ${done}/${clips.length} ready` };
 }
 
+// ─── Stage: clips_ready → lipsyncing (presenter) or assembled ────────────────
+// Presenter mode: synthesize each beat's voiceover line (account voice
+// instructions carry the accent), then send every avatar clip + its line to the
+// lip-sync model so mouth movement matches the words. B-roll lines are kept as
+// narration and mixed in at assembly. Non-presenter runs fall through to
+// assembly directly.
+
+async function stageLipsyncOrAssemble(run: ReelRun): Promise<AdvanceResult> {
+  const account = await getAccount(run.account_id);
+  const brief = run.brief as ReelBrief;
+  const clips: Clip[] = [...(run.clips ?? [])];
+
+  const avatarPending = account.reels_presenter_enabled
+    ? clips.filter(c => brief.beats[c.beat_index]?.shot_type === "avatar" && !c.lipsynced)
+    : [];
+
+  if (avatarPending.length === 0) {
+    return stageAssemble(run);
+  }
+
+  // 1) Voiceover mp3 for every beat that speaks (avatar AND broll) — generated
+  //    once, reused by lipsync now and by the audio mix at assembly.
+  for (const clip of clips) {
+    const beat = brief.beats[clip.beat_index];
+    if (!beat?.voiceover_line || clip.vo_audio_path) continue;
+    const audio = await synthesizeVoiceover(beat.voiceover_line, account.reels_voice_instructions);
+    const upload = await uploadToBucket(`reels/${run.id}/vo-${clip.beat_index}.mp3`, audio, "audio/mpeg");
+    clip.vo_audio_path = upload.path;
+    await saveRun(run.id, { clips });
+  }
+
+  // 2) Lip-sync jobs for the avatar clips.
+  for (const clip of avatarPending) {
+    if (clip.lipsync_request_id || !clip.url || !clip.vo_audio_path) continue;
+    const { requestId } = await submitLipsync({
+      videoUrl: clip.url,
+      audioUrl: publicUrlFor(clip.vo_audio_path),
+    });
+    clip.lipsync_request_id = requestId;
+    clip.lipsync_submitted_at = new Date().toISOString();
+  }
+
+  await saveRun(run.id, { clips, status: "lipsyncing", error_message: null });
+  return { from: "clips_ready", to: "lipsyncing", note: `${avatarPending.length} avatar clip(s) submitted for lip sync` };
+}
+
+// ─── Stage: lipsyncing → clips_ready ─────────────────────────────────────────
+// Polls lip-sync jobs; replaces each avatar clip in storage with the
+// mouth-matched version. Failures/stale jobs are resubmitted, costing one
+// attempt. When every avatar clip is lipsynced the run returns to clips_ready,
+// where the pending check now passes and assembly runs next tick.
+
+async function stageLipsyncPoll(run: ReelRun): Promise<AdvanceResult> {
+  const brief = run.brief as ReelBrief;
+  const clips: Clip[] = [...(run.clips ?? [])];
+  const failures: string[] = [];
+
+  const avatarClips = clips.filter(c => brief.beats[c.beat_index]?.shot_type === "avatar");
+
+  for (const clip of avatarClips) {
+    if (clip.lipsynced || !clip.lipsync_request_id) continue;
+
+    const check = await checkLipsyncJob(clip.lipsync_request_id);
+    if (check.status === "done") {
+      const buffer = await fetchToBuffer(check.videoUrl);
+      const upload = await uploadToBucket(`reels/${run.id}/clip-${clip.beat_index}.mp4`, buffer, "video/mp4");
+      clip.storage_path = upload.path;
+      clip.url = upload.publicUrl;
+      clip.lipsynced = true;
+      await saveRun(run.id, { clips });
+    } else if (check.status === "failed") {
+      failures.push(`beat ${clip.beat_index}: ${check.error}`);
+      clip.lipsync_request_id = undefined;
+    } else {
+      const ageMin = clip.lipsync_submitted_at
+        ? (Date.now() - new Date(clip.lipsync_submitted_at).getTime()) / 60_000
+        : 0;
+      if (ageMin > CLIP_TIMEOUT_MIN) {
+        failures.push(`beat ${clip.beat_index}: lipsync job stale after ${Math.round(ageMin)} min`);
+        clip.lipsync_request_id = undefined;
+      }
+    }
+  }
+
+  if (failures.length > 0) {
+    // Resubmit cleared jobs now; throw so attempt accounting applies.
+    for (const clip of avatarClips) {
+      if (clip.lipsynced || clip.lipsync_request_id || !clip.url || !clip.vo_audio_path) continue;
+      const { requestId } = await submitLipsync({
+        videoUrl: clip.url,
+        audioUrl: publicUrlFor(clip.vo_audio_path),
+      });
+      clip.lipsync_request_id = requestId;
+      clip.lipsync_submitted_at = new Date().toISOString();
+    }
+    await saveRun(run.id, { clips });
+    throw new Error(`Lip sync failed (resubmitted): ${failures.join("; ")}`);
+  }
+
+  if (avatarClips.every(c => c.lipsynced)) {
+    await saveRun(run.id, { clips, status: "clips_ready", error_message: null });
+    return { from: "lipsyncing", to: "clips_ready", note: `${avatarClips.length} avatar clip(s) mouth-matched` };
+  }
+
+  const done = avatarClips.filter(c => c.lipsynced).length;
+  return { from: "lipsyncing", to: "lipsyncing", note: `lipsync ${done}/${avatarClips.length} done` };
+}
+
 // ─── Stage: clips_ready → assembled ──────────────────────────────────────────
 
 async function stageAssemble(run: ReelRun): Promise<AdvanceResult> {
   const brief = run.brief as ReelBrief;
+  const account = await getAccount(run.account_id);
   const clipRows = (run.clips as Clip[]).filter(c => c.status === "done" && c.storage_path);
   clipRows.sort((a, b) => a.beat_index - b.beat_index);
 
@@ -237,23 +418,31 @@ async function stageAssemble(run: ReelRun): Promise<AdvanceResult> {
   const totalS = brief.beats.reduce((s, b) => s + b.duration_s, 0);
   const music = await resolveMusic(brief.audio_mood, totalS);
 
-  let voiceover: Buffer | null = null;
-  if (brief.voiceover_script && voiceoverEnabled()) {
-    voiceover = await synthesizeVoiceover(brief.voiceover_script);
+  // Per-beat voiceovers, placed at each beat's offset in the timeline. Avatar
+  // beats use the SAME mp3 the lip-sync ran against, so mouths stay matched.
+  const voiceovers: { beatIndex: number; buffer: Buffer }[] = [];
+  if (account.reels_presenter_enabled) {
+    for (const c of clipRows) {
+      if (c.vo_audio_path) {
+        voiceovers.push({ beatIndex: c.beat_index, buffer: await downloadFromBucket(c.vo_audio_path) });
+      }
+    }
+  } else if (brief.voiceover_script && voiceoverEnabled()) {
+    voiceovers.push({ beatIndex: 0, buffer: await synthesizeVoiceover(brief.voiceover_script, account.reels_voice_instructions) });
   }
 
   const finalVideo = await assembleReel({
     clips,
     beats: brief.beats,
     music: music.source === "none" ? null : music.buffer,
-    voiceover,
+    voiceovers,
   });
 
   const upload = await uploadToBucket(`reels/${run.id}/final.mp4`, finalVideo, "video/mp4");
   const audio: ReelRunAudio = {
     music_source: music.source,
     ...(music.source === "library" ? { music_track_id: music.trackId } : {}),
-    voiceover: voiceover != null,
+    voiceover: voiceovers.length > 0,
   };
 
   await saveRun(run.id, {
@@ -288,6 +477,7 @@ async function stageCaption(run: ReelRun): Promise<AdvanceResult> {
     learningsPromptBlock(learnings) || null,
     `The Reel being captioned:`,
     `- Hook: ${brief.hook}`,
+    brief.event_location ? `- Real event/location: ${brief.event_location} (facts in the caption must match it)` : null,
     `- On-screen beats: ${brief.beats.map(b => b.subtitle).join(" / ")}`,
     `- Caption angle: ${brief.caption_angle}`,
     `- Call to action: ${brief.cta}`,
@@ -489,7 +679,8 @@ export async function advanceRun(run: ReelRun): Promise<AdvanceResult> {
     case "briefed": return stageKeyframes(run);
     case "keyframes_ready": return stageSubmitClips(run);
     case "clips_generating": return stageCollectClips(run);
-    case "clips_ready": return stageAssemble(run);
+    case "clips_ready": return stageLipsyncOrAssemble(run);
+    case "lipsyncing": return stageLipsyncPoll(run);
     case "assembled": return stageCaption(run);
     case "captioned": return stageStartPublish(run);
     case "publishing": return stageFinishPublish(run);
