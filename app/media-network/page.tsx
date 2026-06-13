@@ -8,6 +8,7 @@ import SourceManager from "@/app/components/media-network/SourceManager";
 import NewsDesk from "@/app/components/media-network/NewsDesk";
 import ClipDesk from "@/app/components/media-network/ClipDesk";
 import ContentPackages from "@/app/components/media-network/ContentPackages";
+import AutoQueue from "@/app/components/media-network/AutoQueue";
 import ManualQueue from "@/app/components/media-network/ManualQueue";
 import PerformanceLab from "@/app/components/media-network/PerformanceLab";
 
@@ -30,6 +31,7 @@ const TABS = [
   { id: "clips", label: "Clip Desk" },
   { id: "sources", label: "Sources" },
   { id: "packages", label: "Packages" },
+  { id: "auto", label: "Auto Queue" },
   { id: "manual", label: "Manual Queue" },
   { id: "performance", label: "Performance" },
 ] as const;
@@ -129,6 +131,7 @@ export default function MediaNetworkPage() {
         {tab === "news" && <NewsDesk />}
         {tab === "clips" && <ClipDesk />}
         {tab === "packages" && <ContentPackages />}
+        {tab === "auto" && <AutoQueue />}
         {tab === "manual" && <ManualQueue />}
         {tab === "performance" && <PerformanceLab />}
       </div>

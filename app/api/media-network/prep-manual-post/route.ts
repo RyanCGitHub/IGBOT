@@ -22,7 +22,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: false, error: "news_item_id is required." }, { status: 400 });
   }
 
-  const result = await buildNewsPackage(itemId, "image_headline_post", { mode: "manual" });
+  // The owner clicking "Music post" on the desk (after the sensitivity warning)
+  // is explicit consent, so high-sensitivity items can be prepped for manual.
+  const result = await buildNewsPackage(itemId, "image_headline_post", { mode: "manual", allowHighSensitivity: true });
   if (!result.ok) {
     return NextResponse.json({ success: false, error: result.error }, { status: result.status });
   }
