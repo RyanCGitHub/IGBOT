@@ -8,6 +8,7 @@ import SourceManager from "@/app/components/media-network/SourceManager";
 import NewsDesk from "@/app/components/media-network/NewsDesk";
 import ClipDesk from "@/app/components/media-network/ClipDesk";
 import ContentPackages from "@/app/components/media-network/ContentPackages";
+import PerformanceLab from "@/app/components/media-network/PerformanceLab";
 
 // Media Network — the newsroom. Owner's no-clutter rule: KPI strip on top,
 // ONE desk visible at a time via tabs, everything else stays off-screen.
@@ -126,7 +127,7 @@ export default function MediaNetworkPage() {
         {tab === "news" && <NewsDesk />}
         {tab === "clips" && <ClipDesk />}
         {tab === "packages" && <ContentPackages />}
-        {tab === "performance" && <ComingSoon phase="Phase 7 (Performance Lab)" />}
+        {tab === "performance" && <PerformanceLab />}
       </div>
     </main>
   );

@@ -23,6 +23,7 @@ import {
 } from "@/lib/instagram";
 import { getPersonaForAccount, personaPromptBlock, applyDisclosure } from "@/lib/persona";
 import { publishingPaused } from "@/lib/cron-auth";
+import { checkPostingSpacing } from "@/lib/media-network/spacing";
 import { getActiveLearnings, learningsPromptBlock } from "@/lib/learning";
 import type { ReelRun, ReelBrief, Keyframe, Clip, ReelRunAudio } from "@/lib/reels/types";
 
@@ -657,6 +658,13 @@ async function stageStartPublish(run: ReelRun): Promise<AdvanceResult> {
   }
   if (run.scheduled_for && new Date(run.scheduled_for).getTime() > Date.now()) {
     return { from: "captioned", to: "captioned", note: `waiting for slot ${run.scheduled_for}` };
+  }
+
+  // Per-brand anti-burst spacing (media-network brands; accounts without a
+  // brand are unconstrained). A held run just waits for the next tick.
+  const spacing = await checkPostingSpacing(run.account_id);
+  if (!spacing.allowed) {
+    return { from: "captioned", to: "captioned", note: `spacing hold — ${spacing.waitMinutes}m until this account may post again` };
   }
 
   const brief = run.brief as ReelBrief | null;
