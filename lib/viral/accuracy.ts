@@ -214,27 +214,46 @@ export async function recordPublishedPost(ctx: {
       mediaUrl = (post?.image_url as string | null) ?? null;
     }
 
-    const { error } = await supabaseServer.from("published_posts").upsert({
+    const now = ctx.publishedAt ?? new Date().toISOString();
+    const hasPrediction = review?.viral_score != null;
+    const { data: saved, error } = await supabaseServer.from("published_posts").upsert({
       content_review_id: review?.id ?? null,
       account_id: ctx.accountId,
       instagram_media_id: ctx.instagramMediaId,
       ig_post_id: ctx.igPostId,
       reel_run_id: ctx.reelRunId ?? null,
       media_type: (review?.content_type as string) ?? (ctx.kind === "reel" ? "reel" : "photo"),
+      media_product_type: ctx.kind === "reel" ? "REELS" : "FEED",
       content_lane: (review?.lane as string) ?? null,
+      publish_method: ctx.kind === "reel" ? "reel_pipeline" : "publisher",
+      status: "published",
       caption: (review?.caption as string) ?? null,
       hashtags: (review?.hashtags as string) ?? null,
       audio_name: (review?.audio_note as string) ?? null,
       media_public_url: mediaUrl,
+      thumbnail_url: mediaUrl,
       permalink: ctx.permalink ?? null,
+      instagram_permalink: ctx.permalink ?? null,
       predicted_viral_score: (review?.viral_score as number) ?? null,
       confidence_score: (review?.confidence_score as number) ?? null,
       scoring_model_version: (review?.scoring_model_version as string) ?? null,
-      published_at: ctx.publishedAt ?? new Date().toISOString(),
-      tracking_status: review?.viral_score != null ? "tracking" : "no_prediction",
-    }, { onConflict: "instagram_media_id" });
+      viral_checker_status: hasPrediction ? "complete" : "missing",
+      published_at: now,
+      detected_at: now,
+      tracking_status: hasPrediction ? "tracking" : "no_prediction",
+      analytics_tracking_status: "tracking",
+      next_analytics_sync_at: now,  // sync on the next hourly pass
+      updated_at: now,
+    }, { onConflict: "instagram_media_id" }).select("id").single();
     if (error) { console.error(`[viral-accuracy] recordPublishedPost failed: ${error.message}`); return; }
-    console.log(`[viral-accuracy] published_post recorded media=${ctx.instagramMediaId} review=${review?.id ?? "none"} predicted=${review?.viral_score ?? "n/a"}`);
+
+    // Backfill the published_post link onto the prediction's history row.
+    if (review?.id && saved?.id) {
+      await supabaseServer.from("viral_score_history")
+        .update({ published_post_id: saved.id, instagram_media_id: ctx.instagramMediaId })
+        .eq("content_review_id", review.id).is("published_post_id", null);
+    }
+    console.log(`[viral-accuracy] published_post recorded media=${ctx.instagramMediaId} review=${review?.id ?? "none"} predicted=${review?.viral_score ?? "n/a"} viral_checker=${hasPrediction ? "complete" : "missing"}`);
   } catch (e) {
     console.error("[viral-accuracy] recordPublishedPost threw:", e instanceof Error ? e.message : e);
   }

@@ -29,6 +29,12 @@ export default function DashboardShell({ children }: { children: ReactNode }) {
           </div>
           <div className="flex items-center gap-2">
             <a
+              href="/analytics"
+              className="inline-flex w-fit items-center gap-1.5 rounded-full border border-slate-700 bg-slate-800/80 px-3 py-1 text-xs font-medium text-slate-300 transition hover:bg-slate-700"
+            >
+              Analytics →
+            </a>
+            <a
               href="/viral-checker"
               className="inline-flex w-fit items-center gap-1.5 rounded-full border border-slate-700 bg-slate-800/80 px-3 py-1 text-xs font-medium text-slate-300 transition hover:bg-slate-700"
             >
