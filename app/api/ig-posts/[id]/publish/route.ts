@@ -28,6 +28,12 @@ export async function POST(
   const result = await publishIgPost(postId, { accountIdOverride });
 
   if (!result.success) {
+    if ("held" in result) {
+      return NextResponse.json(
+        { success: false, held: true, error: result.error, viralScore: result.viralScore },
+        { status: 409 }
+      );
+    }
     return NextResponse.json(
       { success: false, error: result.error, logs: result.logs },
       { status: result.httpStatus }
