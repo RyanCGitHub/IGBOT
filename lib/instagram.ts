@@ -410,3 +410,44 @@ export async function getMediaInsights(
   // only populated for REELS — it is not a valid single-image metric.
   return { likes, comments, reach, impressions: null, saves, shares, views, raw, insightsError };
 }
+
+// ─── List recent media for an IG user (analytics sync / auto-detection) ───────
+
+export type IGMediaItem = {
+  id: string;
+  media_type: string | null;        // IMAGE | VIDEO | CAROUSEL_ALBUM
+  media_product_type: string | null; // FEED | REELS | AD
+  permalink: string | null;
+  timestamp: string | null;
+  caption: string | null;
+  media_url: string | null;
+  thumbnail_url: string | null;
+};
+
+// GET /{ig-user-id}/media — newest first. Best-effort; returns [] on error so a
+// sync never crashes on one bad account.
+export async function getUserMedia(
+  igUserId: string,
+  accessToken: string,
+  limit = 25
+): Promise<IGMediaItem[] | { error: string; code?: number }> {
+  const fields = "id,media_type,media_product_type,permalink,timestamp,caption,media_url,thumbnail_url";
+  const url = `https://graph.facebook.com/v21.0/${igUserId}/media?fields=${fields}&limit=${limit}&access_token=${accessToken}`;
+  try {
+    const res = await fetch(url);
+    const data = (await res.json()) as { data?: IGMediaItem[]; error?: { message?: string; code?: number } };
+    if (!res.ok || data.error) return { error: data.error?.message ?? `HTTP ${res.status}`, code: data.error?.code };
+    return data.data ?? [];
+  } catch (e) {
+    return { error: `Network error listing media: ${e instanceof Error ? e.message : String(e)}` };
+  }
+}
+
+// GET /{ig-user-id}?fields=followers_count — for views_per_follower.
+export async function getFollowerCount(igUserId: string, accessToken: string): Promise<number | null> {
+  try {
+    const res = await fetch(`https://graph.facebook.com/v21.0/${igUserId}?fields=followers_count&access_token=${accessToken}`);
+    const data = (await res.json()) as { followers_count?: number };
+    return typeof data.followers_count === "number" ? data.followers_count : null;
+  } catch { return null; }
+}

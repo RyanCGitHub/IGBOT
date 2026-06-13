@@ -1,5 +1,6 @@
 import { supabaseServer } from "@/lib/supabase-server";
 import { getAnalysisImageB64, scoreContent } from "@/lib/viral/score";
+import { writeScoreHistory } from "@/lib/viral/score-history";
 import { SCORING_MODEL_VERSION } from "@/lib/viral/version";
 import type { ContentType, ContentLane } from "@/lib/viral/rubric";
 
@@ -101,6 +102,16 @@ export async function prePublishGate(ctx: {
     gate_decision: decision,
     raw: { weights: scored.weights, model: "claude-sonnet-4-5", threshold: config.min_score, gate_enabled: config.enabled },
   }).select("id").single();
+
+  // Append the prediction to the queryable score history.
+  await writeScoreHistory({
+    scored,
+    scoreContext: "pre_publish_prediction",
+    accountId: ctx.accountId,
+    contentReviewId: saved?.id ?? null,
+    contentLane: lane,
+    mediaType: ctx.contentType,
+  });
 
   return {
     allow: !held,

@@ -3,6 +3,7 @@ import { supabaseServer } from "@/lib/supabase-server";
 import { requireApiKey } from "@/lib/auth";
 import { publicUrlFor } from "@/lib/reels/storage";
 import { getAnalysisImageB64, scoreContent } from "@/lib/viral/score";
+import { writeScoreHistory } from "@/lib/viral/score-history";
 import { SCORING_MODEL_VERSION } from "@/lib/viral/version";
 import type { ContentType, ContentLane } from "@/lib/viral/rubric";
 
@@ -80,6 +81,12 @@ export async function POST(request: Request) {
     scoring_model_version: SCORING_MODEL_VERSION,
     raw: { weights: scored.weights, model: "claude-sonnet-4-5" },
   }).select("id").single();
+
+  await writeScoreHistory({
+    scored, scoreContext: "manual_check",
+    accountId: body.account_id ?? null, contentReviewId: saved?.id ?? null,
+    contentLane: lane, mediaType: contentType,
+  });
 
   return NextResponse.json({
     success: true,
