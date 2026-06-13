@@ -150,6 +150,7 @@ export type ContentPackage = {
   urgency_level: UrgencyLevel;
   status: PackageStatus;
   linked_ig_post_id: number | null;
+  linked_reel_run_id: number | null;
   created_at: string;
   updated_at: string;
 };
