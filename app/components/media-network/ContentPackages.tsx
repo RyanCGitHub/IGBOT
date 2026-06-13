@@ -37,7 +37,8 @@ export default function ContentPackages() {
 
   const refresh = useCallback(async () => {
     try {
-      const res = await apiFetch(`/api/media-network/packages${filter === "all" ? "" : `?status=${filter}`}`);
+      // manual_only packages live in their own Manual Queue tab — keep this hub clean.
+      const res = await apiFetch(`/api/media-network/packages?manual_only=false${filter === "all" ? "" : `&status=${filter}`}`);
       const data = await res.json();
       if (!res.ok || data.success === false) throw new Error(data.error || "Failed to load packages.");
       setPackages(data.packages as ContentPackage[]);

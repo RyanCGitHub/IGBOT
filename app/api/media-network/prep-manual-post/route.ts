@@ -2,18 +2,18 @@ import { NextResponse } from "next/server";
 import { requireApiKey } from "@/lib/auth";
 import { buildNewsPackage } from "@/lib/media-network/news-package";
 
-// Turns an approved/reviewed news item into a content_package. The generation
-// logic lives in lib/media-network/news-package.ts so the auto-pilot worker
-// shares the exact same caption/hedging/compliance path — this route is the
-// thin manual entry point.
+// Manual-post lane: build the package + a silent 9:16 motion Reel, then park it
+// in the Manual Queue (status "ready", manual_only). It is NOT scheduled or
+// auto-published — the owner downloads the assets, finishes the Reel in the IG
+// app (adding trending audio), and posts by hand.
 export const dynamic = "force-dynamic";
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 export async function POST(request: Request) {
   const authError = requireApiKey(request);
   if (authError) return authError;
 
-  let body: { news_item_id?: number; package_type?: string };
+  let body: { news_item_id?: number };
   try { body = (await request.json()) as typeof body; }
   catch { return NextResponse.json({ success: false, error: "Invalid request body." }, { status: 400 }); }
 
@@ -22,7 +22,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: false, error: "news_item_id is required." }, { status: 400 });
   }
 
-  const result = await buildNewsPackage(itemId, body.package_type);
+  const result = await buildNewsPackage(itemId, "image_headline_post", { mode: "manual" });
   if (!result.ok) {
     return NextResponse.json({ success: false, error: result.error }, { status: result.status });
   }

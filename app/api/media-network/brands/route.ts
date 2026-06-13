@@ -77,6 +77,9 @@ function sanitize(body: BrandBody, isCreate: boolean): { patch: Record<string, u
     if (!STATUSES.has(String(body.status))) return { error: "Invalid status." };
     patch.status = body.status;
   }
+  if (body.auto_publish !== undefined) {
+    patch.auto_publish = Boolean(body.auto_publish);
+  }
 
   return { patch };
 }

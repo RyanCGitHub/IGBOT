@@ -111,6 +111,28 @@ export default function NewsDesk() {
     }
   }
 
+  // Manual lane: build image + silent 9:16 Reel, park it in the Manual Queue.
+  async function prepManual(item: NewsItem) {
+    setBusyId(item.id);
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await apiFetch("/api/media-network/prep-manual-post", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ news_item_id: item.id }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.success === false) throw new Error(data.error || "Prep failed.");
+      setNotice(`Prepped for manual posting — open the Manual Queue tab to download the image + Reel and copy the caption, then post in the app with your song.`);
+      await refresh();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   const brandName = (id: number) => brands.find(b => b.id === id)?.brand_name ?? `Brand ${id}`;
 
   return (
@@ -181,7 +203,11 @@ export default function NewsDesk() {
         </p>
       ) : (
         <div className="space-y-2">
-          {items.map(item => (
+          {items.map(item => {
+            const brand = brands.find(b => b.id === item.media_brand_id);
+            const autoOn = !!brand?.auto_publish;
+            const isHigh = item.sensitivity_level === "high";
+            return (
             <div key={item.id} className="rounded-xl border border-slate-700/60 bg-slate-900/60 px-4 py-3">
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div className="min-w-0 flex-1">
@@ -195,10 +221,23 @@ export default function NewsDesk() {
                     )}
                   </p>
                 </div>
-                <span className={`shrink-0 rounded-full border px-2.5 py-0.5 text-[11px] font-medium ${sensChip(item.sensitivity_level)}`}>
-                  {item.sensitivity_level} sensitivity
-                </span>
+                <div className="flex shrink-0 items-center gap-1.5">
+                  {autoOn && !isHigh && (
+                    <span className="rounded-full border border-cyan-500/40 bg-cyan-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-cyan-300">
+                      auto
+                    </span>
+                  )}
+                  <span className={`rounded-full border px-2.5 py-0.5 text-[11px] font-medium ${sensChip(item.sensitivity_level)}`}>
+                    {item.sensitivity_level} sensitivity
+                  </span>
+                </div>
               </div>
+
+              {item.status === "needs_review" && item.review_note && (
+                <p className="mt-2 rounded-lg border border-rose-500/30 bg-rose-500/10 px-2.5 py-1.5 text-[11px] text-rose-300">
+                  Auto-pilot returned this: {item.review_note}
+                </p>
+              )}
 
               <div className="mt-2 flex flex-wrap items-center gap-2">
                 <select
@@ -212,7 +251,7 @@ export default function NewsDesk() {
                   <option value="official_source">official source</option>
                   <option value="rejected">rejected</option>
                 </select>
-                {item.sensitivity_level === "high" && item.status !== "approved" && (
+                {isHigh && item.status !== "approved" && (
                   <button
                     type="button"
                     onClick={() => patchItem(item.id, { status: "approved" })}
@@ -228,17 +267,44 @@ export default function NewsDesk() {
                 >
                   Dismiss
                 </button>
+
                 <button
                   type="button"
-                  disabled={busyId === item.id || (item.sensitivity_level === "high" && item.status !== "approved")}
-                  onClick={() => generatePackage(item)}
-                  className="ml-auto rounded-lg bg-fuchsia-500/90 px-3 py-1.5 text-[11px] font-semibold text-slate-950 transition hover:bg-fuchsia-400 disabled:opacity-40"
+                  disabled={busyId === item.id || (isHigh && item.status !== "approved")}
+                  onClick={() => prepManual(item)}
+                  title="Build image + silent Reel, then post by hand in the app with a trending song"
+                  className="rounded-lg border border-violet-500/40 bg-violet-500/10 px-2 py-1 text-[11px] font-medium text-violet-300 transition hover:bg-violet-500/20 disabled:opacity-40"
                 >
-                  {busyId === item.id ? "Generating…" : "Generate Package →"}
+                  {busyId === item.id ? "Prepping…" : "🎵 Music post"}
                 </button>
+
+                {autoOn && !isHigh ? (
+                  // Single gate: approval hands off to the auto-pilot cron.
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await patchItem(item.id, { status: "approved" });
+                      setNotice(`Approved — auto-pilot will generate, schedule (spacing-applied), and publish "${item.headline.slice(0, 50)}…". No further action needed.`);
+                    }}
+                    className="ml-auto rounded-lg bg-emerald-500/90 px-3 py-1.5 text-[11px] font-semibold text-slate-950 transition hover:bg-emerald-400"
+                  >
+                    Approve & Auto-Publish →
+                  </button>
+                ) : (
+                  // Manual path: brands with auto-publish off, or high-sensitivity items.
+                  <button
+                    type="button"
+                    disabled={busyId === item.id || (isHigh && item.status !== "approved")}
+                    onClick={() => generatePackage(item)}
+                    className="ml-auto rounded-lg bg-fuchsia-500/90 px-3 py-1.5 text-[11px] font-semibold text-slate-950 transition hover:bg-fuchsia-400 disabled:opacity-40"
+                  >
+                    {busyId === item.id ? "Generating…" : isHigh ? "Generate (manual) →" : "Generate Package →"}
+                  </button>
+                )}
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

@@ -27,6 +27,9 @@ export async function POST(request: Request) {
 
   const { data: pkg } = await supabaseServer.from("content_packages").select("*").eq("id", pkgId).single<ContentPackage>();
   if (!pkg) return NextResponse.json({ success: false, error: "Package not found." }, { status: 404 });
+  if (pkg.manual_only) {
+    return NextResponse.json({ success: false, error: "This is a manual-post package — finish it in the Instagram app, not through the publisher." }, { status: 400 });
+  }
   if (pkg.status !== "ready") {
     return NextResponse.json({ success: false, error: `Package must be approved (ready) first — current status: ${pkg.status}.` }, { status: 400 });
   }

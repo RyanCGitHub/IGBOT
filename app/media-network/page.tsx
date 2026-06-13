@@ -8,6 +8,7 @@ import SourceManager from "@/app/components/media-network/SourceManager";
 import NewsDesk from "@/app/components/media-network/NewsDesk";
 import ClipDesk from "@/app/components/media-network/ClipDesk";
 import ContentPackages from "@/app/components/media-network/ContentPackages";
+import ManualQueue from "@/app/components/media-network/ManualQueue";
 import PerformanceLab from "@/app/components/media-network/PerformanceLab";
 
 // Media Network — the newsroom. Owner's no-clutter rule: KPI strip on top,
@@ -29,6 +30,7 @@ const TABS = [
   { id: "clips", label: "Clip Desk" },
   { id: "sources", label: "Sources" },
   { id: "packages", label: "Packages" },
+  { id: "manual", label: "Manual Queue" },
   { id: "performance", label: "Performance" },
 ] as const;
 
@@ -127,6 +129,7 @@ export default function MediaNetworkPage() {
         {tab === "news" && <NewsDesk />}
         {tab === "clips" && <ClipDesk />}
         {tab === "packages" && <ContentPackages />}
+        {tab === "manual" && <ManualQueue />}
         {tab === "performance" && <PerformanceLab />}
       </div>
     </main>
