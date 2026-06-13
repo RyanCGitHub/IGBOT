@@ -239,6 +239,12 @@ export default function NewsDesk() {
                 </p>
               )}
 
+              {isHigh && (
+                <p className="mt-2 rounded-lg border border-rose-500/40 bg-rose-500/10 px-2.5 py-1.5 text-[11px] text-rose-200">
+                  ⚠️ <b>High sensitivity</b> — this story touches crime, legal, death, or minors. Read it carefully. You can still auto-publish or prep it for a manual post; just be sure the framing is right.
+                </p>
+              )}
+
               <div className="mt-2 flex flex-wrap items-center gap-2">
                 <select
                   value={item.verification_status}
@@ -251,15 +257,6 @@ export default function NewsDesk() {
                   <option value="official_source">official source</option>
                   <option value="rejected">rejected</option>
                 </select>
-                {isHigh && item.status !== "approved" && (
-                  <button
-                    type="button"
-                    onClick={() => patchItem(item.id, { status: "approved" })}
-                    className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-[11px] font-medium text-amber-300 transition hover:bg-amber-500/20"
-                  >
-                    Approve high-sensitivity
-                  </button>
-                )}
                 <button
                   type="button"
                   onClick={() => patchItem(item.id, { status: "rejected" })}
@@ -268,9 +265,10 @@ export default function NewsDesk() {
                   Dismiss
                 </button>
 
+                {/* Manual lane — builds image + silent Reel, post by hand with a song. */}
                 <button
                   type="button"
-                  disabled={busyId === item.id || (isHigh && item.status !== "approved")}
+                  disabled={busyId === item.id}
                   onClick={() => prepManual(item)}
                   title="Build image + silent Reel, then post by hand in the app with a trending song"
                   className="rounded-lg border border-violet-500/40 bg-violet-500/10 px-2 py-1 text-[11px] font-medium text-violet-300 transition hover:bg-violet-500/20 disabled:opacity-40"
@@ -278,27 +276,31 @@ export default function NewsDesk() {
                   {busyId === item.id ? "Prepping…" : "🎵 Music post"}
                 </button>
 
-                {autoOn && !isHigh ? (
-                  // Single gate: approval hands off to the auto-pilot cron.
+                {autoOn ? (
+                  // Approval hands off to the auto-pilot cron. High-sensitivity
+                  // items get a confirm step before going to the live account.
                   <button
                     type="button"
                     onClick={async () => {
+                      if (isHigh && !window.confirm(`HIGH-sensitivity story (crime/legal/death/minors).\n\nAuto-publish "${item.headline.slice(0, 80)}" to the live account?`)) return;
                       await patchItem(item.id, { status: "approved" });
-                      setNotice(`Approved — auto-pilot will generate, schedule (spacing-applied), and publish "${item.headline.slice(0, 50)}…". No further action needed.`);
+                      setNotice(`Approved — auto-pilot will generate, schedule (spacing-applied), and publish "${item.headline.slice(0, 50)}…". Track it in the Auto Queue tab.`);
                     }}
-                    className="ml-auto rounded-lg bg-emerald-500/90 px-3 py-1.5 text-[11px] font-semibold text-slate-950 transition hover:bg-emerald-400"
+                    className={`ml-auto rounded-lg px-3 py-1.5 text-[11px] font-semibold text-slate-950 transition ${
+                      isHigh ? "bg-amber-400 hover:bg-amber-300" : "bg-emerald-500/90 hover:bg-emerald-400"
+                    }`}
                   >
-                    Approve & Auto-Publish →
+                    {isHigh ? "Approve & Auto-Publish (sensitive) →" : "Approve & Auto-Publish →"}
                   </button>
                 ) : (
-                  // Manual path: brands with auto-publish off, or high-sensitivity items.
+                  // Manual review flow for brands with auto-publish off.
                   <button
                     type="button"
                     disabled={busyId === item.id || (isHigh && item.status !== "approved")}
                     onClick={() => generatePackage(item)}
                     className="ml-auto rounded-lg bg-fuchsia-500/90 px-3 py-1.5 text-[11px] font-semibold text-slate-950 transition hover:bg-fuchsia-400 disabled:opacity-40"
                   >
-                    {busyId === item.id ? "Generating…" : isHigh ? "Generate (manual) →" : "Generate Package →"}
+                    {busyId === item.id ? "Generating…" : "Generate Package →"}
                   </button>
                 )}
               </div>

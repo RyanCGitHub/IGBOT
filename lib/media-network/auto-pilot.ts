@@ -90,13 +90,15 @@ export async function runNewsAutoPilot(): Promise<AutoPilotSummary> {
 
   const brandById = new Map(autoBrands.map(b => [b.id, b]));
 
-  // Approved, non-HIGH items for those brands — oldest first, bounded batch.
+  // Approved items for those brands — oldest first, bounded batch. HIGH-
+  // sensitivity items are included ONLY once the owner has explicitly approved
+  // them via "Approve & Auto-Publish" (status="approved" is the consent gate;
+  // the desk warns before that button is used).
   const { data: items } = await supabaseServer
     .from("news_items")
     .select("*")
     .in("media_brand_id", autoBrands.map(b => b.id))
     .eq("status", "approved")
-    .neq("sensitivity_level", "high")
     .order("created_at", { ascending: true })
     .limit(MAX_ITEMS_PER_RUN);
 

@@ -23,7 +23,7 @@ export type BuildPackageResult =
 export async function buildNewsPackage(
   itemId: number,
   packageTypeRaw?: string,
-  opts?: { mode?: "auto" | "manual" }
+  opts?: { mode?: "auto" | "manual"; allowHighSensitivity?: boolean }
 ): Promise<BuildPackageResult> {
   const manual = opts?.mode === "manual";
   const packageType = ["breaking_news_reel", "news_carousel", "image_headline_post"].includes(String(packageTypeRaw))
@@ -49,7 +49,9 @@ export async function buildNewsPackage(
       return { ok: false, status: 400, error: verdict.blockers.join(" ") };
     }
   }
-  if (item.sensitivity_level === "high" && item.status !== "approved") {
+  // HIGH-sensitivity items need explicit consent: either an "approved" status
+  // (auto lane) or the manual-prep button passing allowHighSensitivity.
+  if (item.sensitivity_level === "high" && item.status !== "approved" && !opts?.allowHighSensitivity) {
     return { ok: false, status: 400, error: "HIGH sensitivity item — approve it in review before generating a package." };
   }
 
