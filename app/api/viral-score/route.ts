@@ -3,6 +3,7 @@ import { supabaseServer } from "@/lib/supabase-server";
 import { requireApiKey } from "@/lib/auth";
 import { publicUrlFor } from "@/lib/reels/storage";
 import { getAnalysisImageB64, scoreContent } from "@/lib/viral/score";
+import { SCORING_MODEL_VERSION } from "@/lib/viral/version";
 import type { ContentType, ContentLane } from "@/lib/viral/rubric";
 
 // Viral Potential Checker — manual scoring endpoint. The scoring core lives in
@@ -76,6 +77,7 @@ export async function POST(request: Request) {
     ...scored.sub,
     stage: "manual_check",
     gate_decision: "recorded",
+    scoring_model_version: SCORING_MODEL_VERSION,
     raw: { weights: scored.weights, model: "claude-sonnet-4-5" },
   }).select("id").single();
 

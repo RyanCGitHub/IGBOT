@@ -1,5 +1,6 @@
 import { supabaseServer } from "@/lib/supabase-server";
 import { getAnalysisImageB64, scoreContent } from "@/lib/viral/score";
+import { SCORING_MODEL_VERSION } from "@/lib/viral/version";
 import type { ContentType, ContentLane } from "@/lib/viral/rubric";
 
 // Pre-publish viral gate. EVERY published post (Finn reels, news, clips) runs
@@ -64,6 +65,7 @@ export async function prePublishGate(ctx: {
     hashtags: ctx.hashtags || null,
     audio_note: ctx.audioNote || null,
     stage: "pre_publish",
+    scoring_model_version: SCORING_MODEL_VERSION,
     ...linkage,
   };
 

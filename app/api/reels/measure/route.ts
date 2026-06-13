@@ -3,6 +3,7 @@ import { supabaseServer } from "@/lib/supabase-server";
 import { requireCronOrApiKey } from "@/lib/cron-auth";
 import { createLogger, getMediaInsights, MEDIA_DELETED_CODES } from "@/lib/instagram";
 import { reconcileMediaNetwork } from "@/lib/media-network/performance";
+import { evaluatePublishedPosts } from "@/lib/viral/accuracy";
 
 // The "measure → adjust" cron (daily). Syncs insights snapshots for every
 // published post (images and reels), then asks the existing learning engine to
@@ -12,12 +13,12 @@ export const maxDuration = 300;
 
 const MAX_POSTS_PER_RUN = 50;
 
-type PostRow = { id: number; media_id: string; account_id: number | null; media_type: string | null };
+type PostRow = { id: number; media_id: string; account_id: number | null; media_type: string | null; published_at: string | null };
 
 async function measure(origin: string): Promise<NextResponse> {
   const { data: posts, error: postsErr } = await supabaseServer
     .from("ig_posts")
-    .select("id, media_id, account_id, media_type")
+    .select("id, media_id, account_id, media_type, published_at")
     .in("status", ["published", "republished"])
     .not("media_id", "is", null)
     .order("published_at", { ascending: false })
@@ -26,6 +27,13 @@ async function measure(origin: string): Promise<NextResponse> {
   if (postsErr) {
     return NextResponse.json({ success: false, error: postsErr.message }, { status: 500 });
   }
+
+  // Accuracy tracking: which of these posts are tracked, and their published_post id.
+  const igPostIds = (posts ?? []).map(p => p.id);
+  const { data: tracked } = igPostIds.length
+    ? await supabaseServer.from("published_posts").select("id, ig_post_id, published_at").in("ig_post_id", igPostIds)
+    : { data: [] as { id: number; ig_post_id: number; published_at: string | null }[] };
+  const trackedByPost = new Map((tracked ?? []).map(t => [t.ig_post_id as number, t]));
 
   const { data: accounts, error: acctErr } = await supabaseServer
     .from("connected_accounts")
@@ -92,6 +100,28 @@ async function measure(origin: string): Promise<NextResponse> {
     );
     synced++;
     if (post.account_id != null) accountsTouched.add(post.account_id);
+
+    // Accuracy tracking: capture a time-series snapshot for tracked posts.
+    const tp = trackedByPost.get(post.id);
+    if (tp) {
+      const publishedAt = tp.published_at ?? post.published_at;
+      const hours = publishedAt ? (Date.now() - new Date(publishedAt).getTime()) / 3_600_000 : null;
+      const likes = result.likes ?? 0, comments = result.comments ?? 0, shares = result.shares ?? 0, saves = result.saves ?? 0;
+      const total = likes + comments + shares + saves;
+      await supabaseServer.from("post_metrics_snapshots").insert({
+        ig_post_id: post.id,
+        published_post_id: tp.id,
+        instagram_media_id: post.media_id,
+        account_id: post.account_id,
+        captured_at: now,
+        hours_since_publish: hours,
+        views: result.views ?? null, reach: result.reach ?? null,
+        likes, comments, shares, saves,
+        total_interactions: total,
+        engagement_rate: result.reach ? Number((total / result.reach).toFixed(4)) : null,
+      });
+      console.log(`[viral-accuracy] snapshot captured post=${post.id} hours=${hours?.toFixed(1) ?? "?"} views=${result.views ?? "?"}`);
+    }
   }
 
   // Re-distill learnings per account through the existing engine. Internal
@@ -120,8 +150,17 @@ async function measure(origin: string): Promise<NextResponse> {
     console.error("[reels/measure] media-network reconciliation failed:", e instanceof Error ? e.message : e);
   }
 
-  console.log(`[reels/measure] insights synced=${synced} deleted=${deleted} errors=${errors} learnings refreshed for ${learningsRefreshed} account(s); media-network reconciled=${mediaNetwork.reconciled} tagged=${mediaNetwork.tagged}`);
-  return NextResponse.json({ success: true, synced, deleted, errors, learningsRefreshed, mediaNetwork });
+  // Viral score accuracy: rebuild evaluations from the fresh snapshots.
+  let viralAccuracy = { posts: 0, evaluations: 0 };
+  try {
+    const ev = await evaluatePublishedPosts();
+    viralAccuracy = { posts: ev.posts, evaluations: ev.evaluations };
+  } catch (e) {
+    console.error("[reels/measure] viral accuracy evaluation failed:", e instanceof Error ? e.message : e);
+  }
+
+  console.log(`[reels/measure] insights synced=${synced} deleted=${deleted} errors=${errors} learnings refreshed for ${learningsRefreshed} account(s); media-network reconciled=${mediaNetwork.reconciled} tagged=${mediaNetwork.tagged}; viral evals=${viralAccuracy.evaluations}`);
+  return NextResponse.json({ success: true, synced, deleted, errors, learningsRefreshed, mediaNetwork, viralAccuracy });
 }
 
 export async function GET(request: Request) {
