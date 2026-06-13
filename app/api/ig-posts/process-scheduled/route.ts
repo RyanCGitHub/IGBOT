@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase-server";
 import { publishIgPost } from "@/lib/publish-post";
 import { publishingPaused, pausedResponse } from "@/lib/cron-auth";
+import { checkPostingSpacing } from "@/lib/media-network/spacing";
 
 const BATCH_SIZE = 5;
 
@@ -41,7 +42,7 @@ async function processDuePosts() {
   // ── Find due posts ──────────────────────────────────────────────────────────
   const { data: duePosts, error: fetchErr } = await supabaseServer
     .from("ig_posts")
-    .select("id, schedule_attempt_count")
+    .select("id, schedule_attempt_count, account_id")
     .eq("status", "scheduled")
     .lte("scheduled_at", now)
     .is("archived_at", null)
@@ -59,9 +60,21 @@ async function processDuePosts() {
   // ── Process each post ───────────────────────────────────────────────────────
   let published = 0;
   let failed = 0;
+  let spacingHeld = 0;
   const errors: { id: number; error: string }[] = [];
 
   for (const post of duePosts) {
+    // Per-brand anti-burst spacing: a held post stays scheduled and is
+    // retried on the next cron tick — no attempt is consumed.
+    if (post.account_id) {
+      const spacing = await checkPostingSpacing(post.account_id);
+      if (!spacing.allowed) {
+        spacingHeld++;
+        console.log(`[process-scheduled] Post ${post.id} held by spacing rule (${spacing.waitMinutes}m remaining)`);
+        continue;
+      }
+    }
+
     const attemptNow = new Date().toISOString();
 
     // Increment attempt counter before publishing so it's tracked even on crash
@@ -118,7 +131,7 @@ async function processDuePosts() {
     checked: duePosts.length,
     published,
     failed,
-    skipped: 0,
+    skipped: spacingHeld,
     errors,
   });
 }

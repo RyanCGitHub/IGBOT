@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase-server";
 import { requireCronOrApiKey } from "@/lib/cron-auth";
 import { createLogger, getMediaInsights, MEDIA_DELETED_CODES } from "@/lib/instagram";
+import { reconcileMediaNetwork } from "@/lib/media-network/performance";
 
 // The "measure → adjust" cron (daily). Syncs insights snapshots for every
 // published post (images and reels), then asks the existing learning engine to
@@ -111,8 +112,16 @@ async function measure(origin: string): Promise<NextResponse> {
     }
   }
 
-  console.log(`[reels/measure] insights synced=${synced} deleted=${deleted} errors=${errors} learnings refreshed for ${learningsRefreshed} account(s)`);
-  return NextResponse.json({ success: true, synced, deleted, errors, learningsRefreshed });
+  // Media Network feedback loop: package statuses + performance_tags.
+  let mediaNetwork = { reconciled: 0, tagged: 0 };
+  try {
+    mediaNetwork = await reconcileMediaNetwork();
+  } catch (e) {
+    console.error("[reels/measure] media-network reconciliation failed:", e instanceof Error ? e.message : e);
+  }
+
+  console.log(`[reels/measure] insights synced=${synced} deleted=${deleted} errors=${errors} learnings refreshed for ${learningsRefreshed} account(s); media-network reconciled=${mediaNetwork.reconciled} tagged=${mediaNetwork.tagged}`);
+  return NextResponse.json({ success: true, synced, deleted, errors, learningsRefreshed, mediaNetwork });
 }
 
 export async function GET(request: Request) {
