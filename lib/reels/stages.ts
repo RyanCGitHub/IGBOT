@@ -24,6 +24,7 @@ import {
 import { getPersonaForAccount, personaPromptBlock, applyDisclosure } from "@/lib/persona";
 import { publishingPaused } from "@/lib/cron-auth";
 import { checkPostingSpacing } from "@/lib/media-network/spacing";
+import { prePublishGate } from "@/lib/viral/gate";
 import { getActiveLearnings, learningsPromptBlock } from "@/lib/learning";
 import type { ReelRun, ReelBrief, Keyframe, Clip, ReelRunAudio } from "@/lib/reels/types";
 
@@ -665,6 +666,32 @@ async function stageStartPublish(run: ReelRun): Promise<AdvanceResult> {
   const spacing = await checkPostingSpacing(run.account_id);
   if (!spacing.allowed) {
     return { from: "captioned", to: "captioned", note: `spacing hold — ${spacing.waitMinutes}m until this account may post again` };
+  }
+
+  // ── Pre-publish viral gate (scores + records every reel; holds if enabled) ──
+  // Fails OPEN. An owner override flips the run back to "captioned" with
+  // gate_override set, which this honors and clears.
+  {
+    const override = !!(run as ReelRun & { gate_override?: boolean }).gate_override;
+    try {
+      const gate = await prePublishGate({
+        kind: "reel",
+        id: run.id,
+        accountId: run.account_id,
+        contentType: "reel",
+        caption: run.caption ?? "",
+        hashtags: run.hashtags ?? undefined,
+        mediaPath: run.assembled_video_path,
+        override,
+      });
+      if (override) await saveRun(run.id, { gate_override: false });
+      if (!gate.allow) {
+        await saveRun(run.id, { status: "held_review", error_message: `Held by viral gate — score ${gate.viral_score}` });
+        return { from: "captioned", to: "held_review", note: `held by viral gate (score ${gate.viral_score})` };
+      }
+    } catch (e) {
+      console.error(`[reels] viral gate errored for run ${run.id} — publishing anyway:`, e instanceof Error ? e.message : e);
+    }
   }
 
   const brief = run.brief as ReelBrief | null;

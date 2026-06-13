@@ -4,6 +4,10 @@ import { publishIgPost } from "@/lib/publish-post";
 import { publishingPaused, pausedResponse } from "@/lib/cron-auth";
 import { checkPostingSpacing } from "@/lib/media-network/spacing";
 
+// Each publish now runs a pre-publish viral-gate scoring call (Claude vision),
+// so give the batch room beyond the default serverless budget.
+export const maxDuration = 300;
+
 const BATCH_SIZE = 5;
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
@@ -61,6 +65,7 @@ async function processDuePosts() {
   let published = 0;
   let failed = 0;
   let spacingHeld = 0;
+  let gateHeld = 0;
   const errors: { id: number; error: string }[] = [];
 
   for (const post of duePosts) {
@@ -93,6 +98,10 @@ async function processDuePosts() {
       if (result.success) {
         published++;
         console.log(`[process-scheduled] Post ${post.id} published (media: ${result.mediaId})`);
+      } else if ("held" in result && result.held) {
+        // Held by the viral gate — already set to held_review, not a failure.
+        gateHeld++;
+        console.log(`[process-scheduled] Post ${post.id} held by viral gate`);
       } else {
         failed++;
         errors.push({ id: post.id, error: result.error });
@@ -132,6 +141,7 @@ async function processDuePosts() {
     published,
     failed,
     skipped: spacingHeld,
+    gateHeld,
     errors,
   });
 }

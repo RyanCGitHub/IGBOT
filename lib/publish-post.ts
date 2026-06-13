@@ -2,6 +2,7 @@
 // Returns a typed result instead of an HTTP response so callers decide how to surface it.
 
 import { supabaseServer } from "@/lib/supabase-server";
+import { prePublishGate } from "@/lib/viral/gate";
 import {
   createLogger,
   createMediaContainer,
@@ -29,6 +30,14 @@ export type PublishResult =
       // Hint for the HTTP layer — not used by the scheduler
       httpStatus: 400 | 401 | 404 | 409 | 502;
       logs: LogEntry[];
+    }
+  | {
+      // Held by the pre-publish viral gate — not a failure, not a success.
+      success: false;
+      held: true;
+      error: string;
+      viralScore: number | null;
+      logs: LogEntry[];
     };
 
 export type PublishOptions = {
@@ -55,7 +64,7 @@ export async function publishIgPost(
   // ── Fetch post ──────────────────────────────────────────────────────────────
   const { data: post, error: postErr } = await supabaseServer
     .from("ig_posts")
-    .select("id, caption, image_url, account_id, status, media_id, original_media_id, media_type")
+    .select("id, caption, image_url, account_id, status, media_id, original_media_id, media_type, gate_override")
     .eq("id", postId)
     .single();
 
@@ -129,6 +138,37 @@ export async function publishIgPost(
       return err("No Instagram account assigned to this post.", 400);
     }
     account = all[0]; // exactly one connected account → safe backward-compatible fallback
+  }
+
+  // ── Pre-publish viral gate ──────────────────────────────────────────────────
+  // Always scores + records; holds only if the gate is enabled and the score is
+  // below the threshold (and the owner hasn't overridden). Fails OPEN.
+  {
+    const override = !!post.gate_override;
+    try {
+      const gate = await prePublishGate({
+        kind: "ig_post",
+        id: postId,
+        accountId: account.id,
+        contentType: "photo",
+        caption: post.caption ?? "",
+        mediaUrl: post.image_url,
+        override,
+      });
+      if (override) {
+        await supabaseServer.from("ig_posts").update({ gate_override: false, updated_at: new Date().toISOString() }).eq("id", postId);
+      }
+      if (!gate.allow) {
+        await supabaseServer.from("ig_posts")
+          .update({ status: "held_review", updated_at: new Date().toISOString() })
+          .eq("id", postId);
+        console.log(`[publish] post ${postId} HELD by viral gate (score ${gate.viral_score})`);
+        return { success: false, held: true, error: `Held by viral gate — score ${gate.viral_score}.`, viralScore: gate.viral_score, logs: [] };
+      }
+    } catch (e) {
+      // The gate must never block a publish on its own error.
+      console.error(`[publish] viral gate errored for post ${postId} — publishing anyway:`, e instanceof Error ? e.message : e);
+    }
   }
 
   // Safe log — account name + ig_user_id only, never the token.
