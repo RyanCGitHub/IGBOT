@@ -68,7 +68,12 @@ export async function renderHeadlineGraphic(params: {
   }
 
   // ── Bottom-anchored headline block (keeps the subject's face clear) ─────────
-  const creditBaseline = H - 56;
+  // On a 9:16 Reel, Instagram overlays caption/username/action buttons across
+  // the bottom ~25%, so reserve that space and lift the text into the safe
+  // zone. A 4:5 feed photo has no such overlay — keep it near the bottom.
+  const isReel = H >= 1700;
+  const bottomReserve = isReel ? 480 : 56;
+  const creditBaseline = H - bottomReserve;
   // Last headline baseline sits above the credit line; stack the rest upward.
   const lastBaseline = creditBaseline - 70;
   const firstBaseline = lastBaseline - (lines.length - 1) * lineHeight;

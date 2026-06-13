@@ -62,7 +62,8 @@ export default function ManualQueue() {
   return (
     <div className="space-y-4">
       <p className="text-sm text-slate-400">
-        Posts to finish by hand in the Instagram app — download the Reel, add your trending song, paste the caption, publish.
+        Finish these by hand in the app. <span className="text-violet-300">For music:</span> open Instagram → <b>Reel</b> → upload the <b>↓ Reel</b> video (fills the screen, no cropping) → add your song → paste caption.
+        The <b>↓ Image</b> is only for a silent feed photo.
       </p>
       {error && <p className="rounded-xl border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">{error}</p>}
 
