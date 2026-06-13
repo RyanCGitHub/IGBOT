@@ -168,7 +168,7 @@ export async function syncInstagramAnalytics(opts?: { dryRun?: boolean; trigger?
 
       // ── Recheck DUE posts (snapshot) ───────────────────────────────────────
       const { data: duePosts } = await supabaseServer
-        .from("published_posts").select("id, instagram_media_id, media_product_type, published_at, next_analytics_sync_at, account_id")
+        .from("published_posts").select("id, instagram_media_id, media_type, media_product_type, published_at, next_analytics_sync_at, account_id")
         .eq("account_id", accountId).eq("analytics_tracking_status", "tracking")
         .or(`next_analytics_sync_at.is.null,next_analytics_sync_at.lte.${now}`)
         .limit(100);
@@ -177,7 +177,9 @@ export async function syncInstagramAnalytics(opts?: { dryRun?: boolean; trigger?
         sum.existing_posts_rechecked++;
         if (dryRun) continue;
         const mlog = createLogger();
-        const productType = pp.media_product_type === "REELS" ? "REELS" : "IMAGE";
+        // Reels report "views"; images don't. Fall back to media_type so legacy
+        // rows without media_product_type still pull reel metrics.
+        const productType = (pp.media_product_type === "REELS" || pp.media_type === "reel") ? "REELS" : "IMAGE";
         const ins = await getMediaInsights(pp.instagram_media_id as string, token, mlog, productType);
         if ("error" in ins) {
           if (ins.code != null && MEDIA_DELETED_CODES.has(ins.code)) {
