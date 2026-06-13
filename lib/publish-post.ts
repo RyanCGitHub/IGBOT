@@ -3,6 +3,7 @@
 
 import { supabaseServer } from "@/lib/supabase-server";
 import { prePublishGate } from "@/lib/viral/gate";
+import { recordPublishedPost } from "@/lib/viral/accuracy";
 import {
   createLogger,
   createMediaContainer,
@@ -285,6 +286,12 @@ export async function publishIgPost(
 
   await supabaseServer.from("ig_posts").update(updatePayload).eq("id", postId);
   log.add({ step: "update_ig_post", status: "success", detail: `ig_post ${postId} → ${successStatus}` });
+
+  // Accuracy tracking: copy the immutable predicted score into published_posts.
+  await recordPublishedPost({
+    kind: "ig_post", igPostId: postId, accountId: account.id,
+    instagramMediaId: publishResult.mediaId, permalink, publishedAt: new Date().toISOString(),
+  });
 
   return { success: true, mediaId: publishResult.mediaId, permalink, jobId, isRepublish, logs: log.all() };
 }

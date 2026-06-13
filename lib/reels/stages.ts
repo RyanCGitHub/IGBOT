@@ -25,6 +25,7 @@ import { getPersonaForAccount, personaPromptBlock, applyDisclosure } from "@/lib
 import { publishingPaused } from "@/lib/cron-auth";
 import { checkPostingSpacing } from "@/lib/media-network/spacing";
 import { prePublishGate } from "@/lib/viral/gate";
+import { recordPublishedPost } from "@/lib/viral/accuracy";
 import { getActiveLearnings, learningsPromptBlock } from "@/lib/learning";
 import type { ReelRun, ReelBrief, Keyframe, Clip, ReelRunAudio } from "@/lib/reels/types";
 
@@ -800,6 +801,12 @@ async function stageFinishPublish(run: ReelRun): Promise<AdvanceResult> {
       error_message: null,
       updated_at: now,
     }).eq("id", run.ig_post_id);
+
+    // Accuracy tracking: copy the immutable predicted score into published_posts.
+    await recordPublishedPost({
+      kind: "reel", igPostId: run.ig_post_id, reelRunId: run.id, accountId: run.account_id,
+      instagramMediaId: published.mediaId, permalink, publishedAt: now,
+    });
 
     // The pipeline knows its own attributes — feed the learning engine directly.
     await supabaseServer.from("post_attributes").upsert({
