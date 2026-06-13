@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase-server";
 import { requireApiKey } from "@/lib/auth";
+import { publicUrlFor } from "@/lib/reels/storage";
 
 // Content packages: the review hub's data layer. GET lists (with optional
 // status filter); PATCH edits review-editable fields and status transitions.
 export const dynamic = "force-dynamic";
 
-const EDIT_STATUSES = new Set(["idea", "draft", "ready", "rejected", "archived"]);
+// "published" lets the Manual Queue mark hand-posted items done.
+const EDIT_STATUSES = new Set(["idea", "draft", "ready", "rejected", "archived", "published"]);
 
 export async function GET(request: Request) {
   const authError = requireApiKey(request);
@@ -14,13 +16,24 @@ export async function GET(request: Request) {
 
   const { searchParams } = new URL(request.url);
   const status = searchParams.get("status");
+  const manualOnly = searchParams.get("manual_only");
 
   let query = supabaseServer.from("content_packages").select("*").order("created_at", { ascending: false }).limit(100);
   if (status) query = query.eq("status", status);
+  if (manualOnly === "true") query = query.eq("manual_only", true);
+  else if (manualOnly === "false") query = query.eq("manual_only", false);
 
   const { data, error } = await query;
   if (error) return NextResponse.json({ success: false, error: error.message }, { status: 500 });
-  return NextResponse.json({ success: true, packages: data ?? [] });
+
+  // Resolve storage paths to public URLs so the Manual Queue can offer direct
+  // image/video downloads (the bucket is public).
+  const packages = (data ?? []).map(p => ({
+    ...p,
+    media_public_url: p.processed_media_path ? publicUrlFor(p.processed_media_path) : null,
+    manual_video_public_url: p.manual_video_path ? publicUrlFor(p.manual_video_path) : null,
+  }));
+  return NextResponse.json({ success: true, packages });
 }
 
 export async function PATCH(request: Request) {

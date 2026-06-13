@@ -220,6 +220,28 @@ export default function BrandNetwork() {
                   </button>
                 </span>
               </div>
+
+              {brand.brand_type === "news_media" && (
+                <div className="mt-2 flex items-center justify-between rounded-lg border border-slate-700/50 bg-slate-800/40 px-2.5 py-1.5">
+                  <span className="text-[11px] text-slate-400">
+                    Auto-publish{" "}
+                    {brand.auto_publish
+                      ? <span className="font-semibold text-emerald-300">ON — approved items post on their own</span>
+                      : <span className="text-slate-500">off — you publish each one</span>}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => patchBrand(brand.id, { auto_publish: !brand.auto_publish })}
+                    className={`rounded-lg border px-2 py-1 text-[11px] font-medium transition ${
+                      brand.auto_publish
+                        ? "border-rose-500/40 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20"
+                        : "border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20"
+                    }`}
+                  >
+                    {brand.auto_publish ? "Turn off" : "Turn on"}
+                  </button>
+                </div>
+              )}
             </div>
           ))}
         </div>

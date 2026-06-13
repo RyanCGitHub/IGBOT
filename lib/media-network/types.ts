@@ -23,6 +23,7 @@ export type MediaBrand = {
   posting_frequency_goal: number;
   min_minutes_between_posts: number;
   risk_level: RiskLevel;
+  auto_publish: boolean;
   status: BrandStatus;
   created_at: string;
   updated_at: string;
@@ -83,6 +84,7 @@ export type NewsItem = {
   suggested_hook: string | null;
   source_credit_text: string | null;
   status: ReviewStatus;
+  review_note: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -149,6 +151,8 @@ export type ContentPackage = {
   suggested_publish_time: string | null;
   urgency_level: UrgencyLevel;
   status: PackageStatus;
+  manual_only: boolean;
+  manual_video_path: string | null;
   linked_ig_post_id: number | null;
   linked_reel_run_id: number | null;
   created_at: string;
