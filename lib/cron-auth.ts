@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { requireApiKey } from "@/lib/auth";
 
 // ─── Global publishing kill switch ───────────────────────────────────────────
 // REELS_PAUSED=true halts ALL automated publishing: the reels planner/tick and
@@ -23,18 +24,15 @@ export function pausedResponse(): NextResponse {
 // lib/auth so either caller can trigger pipeline work.
 export function requireCronOrApiKey(request: Request): NextResponse | null {
   const cronSecret = process.env.CRON_SECRET;
-  const apiKey = process.env.NEXT_PUBLIC_APP_INTERNAL_API_KEY;
 
-  if (!cronSecret && !apiKey) {
-    console.warn("[cron-auth] Neither CRON_SECRET nor internal API key set — running unauthenticated. Configure both in production.");
-    return null;
-  }
-
+  // Vercel cron path: Authorization: Bearer CRON_SECRET (or x-cron-secret).
   if (cronSecret) {
     if (request.headers.get("authorization") === `Bearer ${cronSecret}`) return null;
     if (request.headers.get("x-cron-secret") === cronSecret) return null;
   }
-  if (apiKey && request.headers.get("x-app-api-key") === apiKey) return null;
 
-  return NextResponse.json({ success: false, error: "Unauthorized." }, { status: 401 });
+  // Otherwise fall through to the dashboard/internal API-key check. requireApiKey
+  // no-ops when no internal key is configured, so setting CRON_SECRET alone no
+  // longer locks the dashboard's manual-trigger buttons out of cron routes.
+  return requireApiKey(request);
 }
