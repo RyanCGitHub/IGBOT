@@ -1,73 +1,96 @@
 import { supabaseServer } from "@/lib/supabase-server";
 import { twitchConfigured, getAppToken, getBroadcasterId, getRecentClips } from "@/lib/media-network/twitch";
-import type { ClipRightsStatus } from "@/lib/media-network/types";
+import { youtubeConfigured, resolveChannel, getRecentVideos } from "@/lib/media-network/youtube";
+import type { ClipRightsStatus, StreamerPlatform } from "@/lib/media-network/types";
 
-// Stream Watch v1 (sanctioned, no new infra): polls the official Twitch Clips
-// API for each tracked streamer (an active `twitch` content_source on a clips
-// brand), ranks new clips by VIEW VELOCITY, and drops the top risers into the
-// Clip Desk as candidates for review. It never downloads clip media or auto-
-// posts — the owner reviews + acquires the file with rights (Clip Desk gate).
+// Stream Watch v1 (sanctioned, no new infra): polls OFFICIAL platform APIs for
+// each tracked streamer (an active twitch/youtube content_source on a clips
+// brand), ranks new material by VIEW VELOCITY, and drops the top risers into
+// the Clip Desk as candidates for review.
+//   • Twitch → official Clips API (actual clips).
+//   • YouTube → Data API: a channel's recent videos + past live streams (no
+//     clips endpoint exists, so we surface the source video to clip from).
+// It never downloads media or auto-posts — the owner reviews + acquires the
+// file with rights (Clip Desk gate). Kick has no official clip/video stats API,
+// so it isn't supported here.
 
 const LOOKBACK_HOURS = 48;
 const MIN_VIEWS = 50;
 const RISERS_PER_SOURCE = 5;
 
-// Source permission → clip rights posture (clipRightsVerdict gates publishing).
 function rightsFor(permission: string): ClipRightsStatus | null {
   switch (permission) {
     case "owned": return "owned";
     case "permissioned": return "permissioned";
     case "public_reference_only": return "commentary_only";
-    case "blocked": return null; // never ingest
-    default: return "needs_review"; // user_submitted / unknown
+    case "blocked": return null;
+    default: return "needs_review";
   }
 }
 
+type Candidate = {
+  id: string; url: string; title: string; view_count: number; created_at: string;
+  thumbnail_url: string; duration_seconds: number; streamer_name: string;
+  platform: StreamerPlatform; kind: string;
+};
+
 export type StreamWatchSummary = {
-  configured: boolean;
-  sources_checked: number;
-  clips_seen: number;
-  candidates_created: number;
-  skipped_existing: number;
-  errors: number;
-  logs: string[];
+  configured: boolean; twitch: boolean; youtube: boolean;
+  sources_checked: number; clips_seen: number; candidates_created: number;
+  skipped_existing: number; errors: number; logs: string[];
 };
 
 export async function runStreamWatch(opts?: { dryRun?: boolean }): Promise<StreamWatchSummary> {
   const dryRun = !!opts?.dryRun;
-  const sum: StreamWatchSummary = { configured: twitchConfigured(), sources_checked: 0, clips_seen: 0, candidates_created: 0, skipped_existing: 0, errors: 0, logs: [] };
+  const twOk = twitchConfigured(), ytOk = youtubeConfigured();
+  const sum: StreamWatchSummary = {
+    configured: twOk || ytOk, twitch: twOk, youtube: ytOk,
+    sources_checked: 0, clips_seen: 0, candidates_created: 0, skipped_existing: 0, errors: 0, logs: [],
+  };
   const log = (m: string) => { sum.logs.push(m); console.log(`[stream-watch] ${m}`); };
 
-  if (!sum.configured) { log("TWITCH_CLIENT_ID / TWITCH_CLIENT_SECRET not set — skipping"); return sum; }
-  const token = await getAppToken();
-  if (!token) { log("could not get Twitch app token"); sum.errors++; return sum; }
+  if (!sum.configured) { log("no provider configured (set TWITCH_* and/or YOUTUBE_API_KEY) — skipping"); return sum; }
+  const twToken = twOk ? await getAppToken() : null;
+  if (twOk && !twToken) log("could not get Twitch app token — Twitch sources will be skipped");
 
-  // Active twitch sources on streamer_clips brands.
   const { data: sources } = await supabaseServer
     .from("content_sources")
-    .select("id, media_brand_id, source_name, platform_handle, permission_status, media_brands!inner(brand_type)")
-    .eq("source_type", "twitch").eq("is_active", true);
-  const twitchSources = (sources ?? []).filter(s => (s.media_brands as { brand_type?: string } | null)?.brand_type === "streamer_clips");
+    .select("id, media_brand_id, source_type, source_name, platform_handle, permission_status, media_brands!inner(brand_type)")
+    .in("source_type", ["twitch", "youtube"]).eq("is_active", true);
+  const watched = (sources ?? []).filter(s => (s.media_brands as { brand_type?: string } | null)?.brand_type === "streamer_clips");
 
-  if (twitchSources.length === 0) { log("no active Twitch sources on a clips brand — add one in Source Manager"); return sum; }
+  if (watched.length === 0) { log("no active Twitch/YouTube sources on a clips brand — add one in Source Manager"); return sum; }
 
-  const since = new Date(Date.now() - LOOKBACK_HOURS * 3_600_000).toISOString();
+  const sinceMs = Date.now() - LOOKBACK_HOURS * 3_600_000;
+  const sinceISO = new Date(sinceMs).toISOString();
 
-  for (const src of twitchSources) {
+  for (const src of watched) {
     sum.sources_checked++;
+    const platform = src.source_type as StreamerPlatform;
     const handle = (src.platform_handle as string) ?? (src.source_name as string);
     const rights = rightsFor(src.permission_status as string);
     if (!rights) { log(`source ${src.id} (${handle}): blocked permission — skipping`); continue; }
 
     try {
-      const broadcasterId = await getBroadcasterId(handle, token);
-      if (!broadcasterId) { log(`source ${src.id}: could not resolve Twitch user "${handle}"`); sum.errors++; continue; }
+      let candidates: Candidate[] = [];
 
-      const clips = await getRecentClips(broadcasterId, token, since, 50);
-      sum.clips_seen += clips.length;
+      if (platform === "twitch") {
+        if (!twToken) continue;
+        const bId = await getBroadcasterId(handle, twToken);
+        if (!bId) { log(`source ${src.id}: could not resolve Twitch user "${handle}"`); sum.errors++; continue; }
+        const clips = await getRecentClips(bId, twToken, sinceISO, 50);
+        candidates = clips.map(c => ({ id: c.id, url: c.url, title: c.title, view_count: c.view_count, created_at: c.created_at, thumbnail_url: c.thumbnail_url, duration_seconds: Math.round(c.duration), streamer_name: c.broadcaster_name, platform: "twitch", kind: "clip" }));
+      } else if (platform === "youtube") {
+        if (!ytOk) { log(`source ${src.id}: YOUTUBE_API_KEY not set — skipping`); continue; }
+        const ch = await resolveChannel(handle);
+        if (!ch) { log(`source ${src.id}: could not resolve YouTube channel "${handle}"`); sum.errors++; continue; }
+        const vids = await getRecentVideos(ch.uploads, sinceISO, 15);
+        candidates = vids.map(v => ({ id: v.id, url: v.url, title: v.title, view_count: v.view_count, created_at: v.published_at, thumbnail_url: v.thumbnail_url, duration_seconds: v.duration_seconds, streamer_name: v.channel_title || handle, platform: "youtube", kind: v.is_stream ? "stream" : "video" }));
+      } else continue;
 
-      // Rank by view velocity (views per hour since creation).
-      const ranked = clips
+      sum.clips_seen += candidates.length;
+
+      const ranked = candidates
         .filter(c => c.view_count >= MIN_VIEWS)
         .map(c => {
           const hours = Math.max((Date.now() - new Date(c.created_at).getTime()) / 3_600_000, 0.25);
@@ -76,9 +99,8 @@ export async function runStreamWatch(opts?: { dryRun?: boolean }): Promise<Strea
         .sort((a, b) => b.velocity - a.velocity)
         .slice(0, RISERS_PER_SOURCE);
 
-      if (ranked.length === 0) { log(`source ${src.id} (${handle}): no risers ≥${MIN_VIEWS} views in ${LOOKBACK_HOURS}h`); continue; }
+      if (ranked.length === 0) { log(`source ${src.id} (${handle}/${platform}): no risers ≥${MIN_VIEWS} views in ${LOOKBACK_HOURS}h`); continue; }
 
-      // Dedup against already-ingested clips for this brand.
       const urls = ranked.map(r => r.c.url);
       const { data: existing } = await supabaseServer
         .from("clip_assets").select("original_clip_url").eq("media_brand_id", src.media_brand_id).in("original_clip_url", urls);
@@ -86,20 +108,20 @@ export async function runStreamWatch(opts?: { dryRun?: boolean }): Promise<Strea
 
       for (const { c, velocity, hours } of ranked) {
         if (seen.has(c.url)) { sum.skipped_existing++; continue; }
-        const summary = `🔥 Stream Watch — ${c.view_count.toLocaleString()} views, ${Math.round(velocity)}/hr, ${hours.toFixed(1)}h old`;
+        const summary = `🔥 Stream Watch (${platform} ${c.kind}) — ${c.view_count.toLocaleString()} views, ${Math.round(velocity)}/hr, ${hours.toFixed(1)}h old`;
         log(`candidate: ${handle} — "${c.title.slice(0, 50)}" (${summary})`);
         if (dryRun) { sum.candidates_created++; continue; }
         const { error } = await supabaseServer.from("clip_assets").insert({
           media_brand_id: src.media_brand_id,
           source_id: src.id,
-          clip_title: c.title.slice(0, 200) || "Untitled clip",
+          clip_title: c.title.slice(0, 200) || "Untitled",
           original_clip_url: c.url,
-          uploaded_file_url: null,          // never auto-downloaded
-          streamer_name: c.broadcaster_name,
-          streamer_platform: "twitch",
-          duration_seconds: Math.round(c.duration),
+          uploaded_file_url: null,            // never auto-downloaded
+          streamer_name: c.streamer_name,
+          streamer_platform: platform,
+          duration_seconds: c.duration_seconds,
           clip_summary: summary,
-          source_credit_text: `Clip: ${c.broadcaster_name} on Twitch`,
+          source_credit_text: `${c.kind === "clip" ? "Clip" : "Source"}: ${c.streamer_name} on ${platform === "twitch" ? "Twitch" : "YouTube"}`,
           rights_status: rights,
           impersonation_risk: "medium",
           status: "imported",
@@ -113,6 +135,6 @@ export async function runStreamWatch(opts?: { dryRun?: boolean }): Promise<Strea
     }
   }
 
-  log(`done — sources=${sum.sources_checked} clips=${sum.clips_seen} candidates=${sum.candidates_created} skipped=${sum.skipped_existing} errors=${sum.errors}`);
+  log(`done — sources=${sum.sources_checked} seen=${sum.clips_seen} candidates=${sum.candidates_created} skipped=${sum.skipped_existing} errors=${sum.errors}`);
   return sum;
 }
