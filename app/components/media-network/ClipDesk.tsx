@@ -39,6 +39,26 @@ export default function ClipDesk() {
   const [showForm, setShowForm] = useState(false);
   const [busyId, setBusyId] = useState<number | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [scanning, setScanning] = useState(false);
+
+  async function scanTwitch() {
+    setScanning(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await apiFetch("/api/media-network/stream-watch", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok || data.success === false) throw new Error(data.error || "Scan failed.");
+      const s = data.summary;
+      if (!s.configured) setError("Twitch isn't configured — add TWITCH_CLIENT_ID and TWITCH_CLIENT_SECRET in Vercel.");
+      else setNotice(`Scanned ${s.sources_checked} streamer(s), ${s.clips_seen} clips — ${s.candidates_created} new candidate(s) added (ranked by view velocity).`);
+      await refresh();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setScanning(false);
+    }
+  }
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [form, setForm] = useState({
@@ -178,13 +198,24 @@ export default function ClipDesk() {
         <p className="text-sm text-slate-400">
           {clips.length} clip{clips.length === 1 ? "" : "s"} in the desk — upload only what you have rights to use
         </p>
-        <button
-          type="button"
-          onClick={() => setShowForm(s => !s)}
-          className="rounded-xl bg-cyan-500/90 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-cyan-400"
-        >
-          {showForm ? "Close" : "+ Upload Clip"}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={scanTwitch}
+            disabled={scanning}
+            title="Poll Twitch for trending clips from your registered streamers"
+            className="rounded-xl border border-violet-500/40 bg-violet-500/10 px-3 py-2 text-sm font-semibold text-violet-300 transition hover:bg-violet-500/20 disabled:opacity-50"
+          >
+            {scanning ? "Scanning…" : "📡 Scan Twitch"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowForm(s => !s)}
+            className="rounded-xl bg-cyan-500/90 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-cyan-400"
+          >
+            {showForm ? "Close" : "+ Upload Clip"}
+          </button>
+        </div>
       </div>
 
       {error && <p className="rounded-xl border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">{error}</p>}
