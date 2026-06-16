@@ -70,6 +70,8 @@ type CreateBody = {
   hashtag_strategy?: string;
   ai_disclosure_enabled?: boolean;
   ai_disclosure_text?: string;
+  character_bible?: Record<string, string>;
+  negative_prompt?: string;
 };
 
 export async function POST(request: Request) {
@@ -117,6 +119,8 @@ export async function POST(request: Request) {
     content_pillars: cleanPillars(body.content_pillars) ?? null,
     audience_description: clamp(body.audience_description, TEXT_MAX),
     hashtag_strategy: clamp(body.hashtag_strategy, TEXT_MAX),
+    character_bible: body.character_bible && typeof body.character_bible === "object" ? body.character_bible : null,
+    negative_prompt: clamp(body.negative_prompt, TEXT_MAX),
   };
   if (typeof body.ai_disclosure_enabled === "boolean") insert.ai_disclosure_enabled = body.ai_disclosure_enabled;
   const disclosure = clamp(body.ai_disclosure_text, SHORT_MAX);

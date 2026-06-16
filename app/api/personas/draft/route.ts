@@ -17,6 +17,7 @@ export type PersonaDraft = {
   content_pillars: string[];
   audience_description: string;
   hashtag_strategy: string;
+  character_bible?: Record<string, string>;
 };
 
 // POST /api/personas/draft
@@ -56,13 +57,29 @@ Return a JSON object with EXACTLY this structure (no markdown, no code blocks):
   "visual_style": "detailed visual identity: subject appearance, color palette, lighting, photography style, recurring settings",
   "content_pillars": ["pillar 1", "pillar 2", "pillar 3"],
   "audience_description": "who follows this persona",
-  "hashtag_strategy": "how this persona uses hashtags"
+  "hashtag_strategy": "how this persona uses hashtags",
+  "character_bible": {
+    "age_range": "e.g. 24-28",
+    "ethnicity_appearance": "skin tone, distinctive features — fictional, not a real or famous person",
+    "face_structure": "jaw, cheekbones, nose, eye shape",
+    "hair": "color, length, style, texture",
+    "body_type": "build/height",
+    "style_fashion": "wardrobe + aesthetic",
+    "personality": "traits that show in photos",
+    "content_niche": "what they post about",
+    "poses": "typical poses/framing (selfie, candid, etc.)",
+    "lighting_style": "e.g. warm golden-hour, soft window light",
+    "camera_style": "e.g. shot on iPhone, 35mm film look",
+    "negative_prompt": "things to avoid for THIS persona (leave generic if none)"
+  }
 }
 
 Rules:
 - Respond with ONLY the JSON object, no surrounding text
 - Make it specific and usable, grounded in the brief
-- content_pillars: 3-5 short items`;
+- content_pillars: 3-5 short items
+- The persona is ENTIRELY FICTIONAL — never base appearance on a real, famous, or identifiable person
+- character_bible drives photorealistic image generation, so be concrete and consistent`;
 
   let rawText: string;
   try {

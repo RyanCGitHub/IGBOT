@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { apiFetch } from "@/lib/api-fetch";
 import type { Persona, ConnectedAccount } from "@/lib/supabase";
+import PersonaPhotos from "@/app/components/PersonaPhotos";
 
 // ─── Form values ────────────────────────────────────────────────────────────────
 
@@ -18,12 +19,14 @@ type FormValues = {
   hashtag_strategy: string;
   ai_disclosure_enabled: boolean;
   ai_disclosure_text: string;
+  character_bible: Record<string, string>;
 };
 
 const EMPTY: FormValues = {
   name: "", handle_display: "", persona_type: "virtual_influencer", bio: "",
   voice_and_tone: "", visual_style: "", content_pillars: "", audience_description: "",
   hashtag_strategy: "", ai_disclosure_enabled: true, ai_disclosure_text: "AI-generated content 🤖",
+  character_bible: {},
 };
 
 function fromPersona(p: Persona): FormValues {
@@ -39,6 +42,7 @@ function fromPersona(p: Persona): FormValues {
     hashtag_strategy: p.hashtag_strategy ?? "",
     ai_disclosure_enabled: p.ai_disclosure_enabled,
     ai_disclosure_text: p.ai_disclosure_text ?? "",
+    character_bible: p.character_bible ?? {},
   };
 }
 
@@ -55,6 +59,7 @@ function toPayload(v: FormValues) {
     hashtag_strategy: v.hashtag_strategy.trim() || null,
     ai_disclosure_enabled: v.ai_disclosure_enabled,
     ai_disclosure_text: v.ai_disclosure_text.trim() || undefined,
+    character_bible: v.character_bible && Object.keys(v.character_bible).length ? v.character_bible : undefined,
   };
 }
 
@@ -102,6 +107,7 @@ function PersonaForm({
         content_pillars: Array.isArray(d.content_pillars) ? (d.content_pillars as string[]).join(", ") : prev.content_pillars,
         audience_description: (d.audience_description as string) || prev.audience_description,
         hashtag_strategy: (d.hashtag_strategy as string) || prev.hashtag_strategy,
+        character_bible: (d.character_bible as Record<string, string>) || prev.character_bible,
       }));
     } finally {
       setIsDrafting(false);
@@ -318,6 +324,10 @@ export default function AIPersonas() {
                     </div>
                   )}
                 </div>
+
+                {persona && !isEditing && (
+                  <PersonaPhotos persona={persona} onSaved={fetchAll} />
+                )}
 
                 {isEditing && (
                   <div className="mt-3">
