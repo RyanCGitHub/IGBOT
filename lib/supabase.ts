@@ -81,6 +81,11 @@ export type Persona = {
   hashtag_strategy: string | null;
   ai_disclosure_enabled: boolean;
   ai_disclosure_text: string;
+  character_bible: Record<string, string> | null;
+  negative_prompt: string | null;
+  reference_image_url: string | null;
+  realism_score: number | null;
+  realism_notes: string | null;
   created_at: string;
   updated_at: string;
 };
