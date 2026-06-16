@@ -5,6 +5,7 @@ import Link from "next/link";
 import { apiFetch } from "@/lib/api-fetch";
 import ManualQueueRecovery from "@/app/components/analytics/ManualQueueRecovery";
 import ScoreHistory from "@/app/components/analytics/ScoreHistory";
+import SyncActivity from "@/app/components/analytics/SyncActivity";
 
 // Analytics hub: real synced Instagram metrics, global or per-page. Page
 // selector filters every number. "Sync Analytics Now" runs the same engine as
@@ -104,6 +105,8 @@ export default function AnalyticsPage() {
         </header>
 
         {note && <p className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-xs text-cyan-300">{note}</p>}
+
+        <SyncActivity />
 
         {/* Page selector */}
         <div className="flex flex-wrap gap-1.5 rounded-2xl border border-slate-700/60 bg-slate-900/70 p-1.5">
