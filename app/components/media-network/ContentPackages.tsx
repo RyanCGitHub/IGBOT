@@ -26,6 +26,7 @@ function statusChip(status: string): string {
 export default function ContentPackages() {
   const [packages, setPackages] = useState<ContentPackage[]>([]);
   const [filter, setFilter] = useState<(typeof STATUS_FILTERS)[number]>("all");
+  const [typeFilter, setTypeFilter] = useState<"all" | "image" | "reel">("all");
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -124,6 +125,10 @@ export default function ContentPackages() {
       ? `https://ecdmboqepwxdnocvrmgg.supabase.co/storage/v1/object/public/instagram-media/${pkg.processed_media_path}`
       : null;
 
+  const shown = packages.filter(p =>
+    typeFilter === "all" ? true : typeFilter === "reel" ? p.package_type === "breaking_news_reel" : p.package_type !== "breaking_news_reel"
+  );
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-1 rounded-2xl border border-slate-700/60 bg-slate-900/70 p-1.5">
@@ -139,6 +144,13 @@ export default function ContentPackages() {
             {s}
           </button>
         ))}
+        <span className="mx-1 h-4 w-px bg-slate-700" />
+        {(["all", "image", "reel"] as const).map(t => (
+          <button key={t} type="button" onClick={() => setTypeFilter(t)}
+            className={`rounded-xl px-3 py-1.5 text-xs font-medium transition ${typeFilter === t ? "bg-slate-800 text-slate-100" : "text-slate-400 hover:text-slate-200"}`}>
+            {t === "all" ? "all types" : t === "reel" ? "Reels" : "Image posts"}
+          </button>
+        ))}
       </div>
 
       {error && <p className="rounded-xl border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">{error}</p>}
@@ -146,13 +158,13 @@ export default function ContentPackages() {
 
       {isLoading ? (
         <div className="h-20 animate-pulse rounded-xl bg-slate-800/60" />
-      ) : packages.length === 0 ? (
+      ) : shown.length === 0 ? (
         <p className="rounded-xl border border-slate-700/60 bg-slate-900/60 px-4 py-6 text-center text-sm text-slate-400">
           No packages here. Generate them from the News Desk or Clip Desk.
         </p>
       ) : (
         <div className="space-y-3">
-          {packages.map(pkg => {
+          {shown.map(pkg => {
             const url = mediaUrl(pkg);
             const isClip = pkg.package_family === "streamer_clips";
             const studioDone = Boolean(pkg.processed_media_path?.includes("/studio/"));
