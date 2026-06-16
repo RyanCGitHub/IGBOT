@@ -16,7 +16,7 @@ export async function POST(request: Request) {
   const authError = requireApiKey(request);
   if (authError) return authError;
 
-  let body: { persona_id?: number; bible?: CharacterBible; scene?: string; variations?: number; save_best?: boolean };
+  let body: { persona_id?: number; bible?: CharacterBible; scene?: string; variations?: number; target_realism?: number; save_best?: boolean };
   try { body = (await request.json()) as typeof body; }
   catch { return NextResponse.json({ success: false, error: "Invalid request body." }, { status: 400 }); }
 
@@ -31,22 +31,30 @@ export async function POST(request: Request) {
   }
   if (!bible) return NextResponse.json({ success: false, error: "No character bible — describe the persona or save its bible first." }, { status: 400 });
 
-  const n = Math.max(1, Math.min(4, Number(body.variations) || 3));
+  // Best-of-N targeting a realism threshold: keep generating until one variation
+  // clears the target (default 90), bounded by MAX_ATTEMPTS to cap cost. Returns
+  // the batch best-first and auto-keeps the most realistic one.
+  const target = Math.min(100, Math.max(50, Number(body.target_realism) || 90));
+  const MAX_ATTEMPTS = 6;
+  const MIN_SHOW = 3;
   const prompt = photorealPrompt(bible, body.scene);
   const provider = createOpenAIImageProvider();
 
   const variations: { url: string; path: string; realism_score: number; looks_ai: boolean; artifacts: string[]; notes: string }[] = [];
-  for (let i = 0; i < n; i++) {
+  for (let i = 0; i < MAX_ATTEMPTS; i++) {
     try {
       const img = await provider.generateImage(prompt, { size: "1024x1536" });
-      const jpeg = await sharp(Buffer.from(img.base64, "base64")).jpeg({ quality: 90 }).toBuffer();
+      const jpeg = await sharp(Buffer.from(img.base64, "base64")).jpeg({ quality: 92 }).toBuffer();
       const path = `personas/${body.persona_id ?? "draft"}/${Date.now()}-${i}.jpg`;
       const up = await uploadToBucket(path, jpeg, "image/jpeg");
       const realism = await scoreRealism(jpeg.toString("base64"));
       variations.push({ url: publicUrlFor(up.path), path: up.path, ...realism });
-      console.log(`[personas/generate-image] variation ${i + 1}/${n} realism=${realism.realism_score}${realism.looks_ai ? " (looks AI)" : ""}`);
+      const bestSoFar = Math.max(...variations.map(v => v.realism_score));
+      console.log(`[personas/generate-image] attempt ${i + 1}/${MAX_ATTEMPTS} realism=${realism.realism_score} (best ${bestSoFar}, target ${target})${realism.looks_ai ? " (looks AI)" : ""}`);
+      // Stop early once we've cleared the target and have enough to show.
+      if (bestSoFar >= target && variations.length >= MIN_SHOW) break;
     } catch (e) {
-      console.error(`[personas/generate-image] variation ${i + 1} failed:`, e instanceof Error ? e.message : e);
+      console.error(`[personas/generate-image] attempt ${i + 1} failed:`, e instanceof Error ? e.message : e);
     }
   }
   if (variations.length === 0) return NextResponse.json({ success: false, error: "All variations failed to generate." }, { status: 502 });

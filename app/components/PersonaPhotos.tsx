@@ -24,7 +24,7 @@ export default function PersonaPhotos({ persona, onSaved }: { persona: Persona; 
     try {
       const res = await apiFetch("/api/personas/generate-image", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ persona_id: persona.id, variations: 3, save_best: true }),
+        body: JSON.stringify({ persona_id: persona.id, target_realism: 90, save_best: true }),
       });
       const data = await res.json();
       if (!res.ok || data.success === false) throw new Error(data.error || "Generation failed.");
@@ -56,7 +56,7 @@ export default function PersonaPhotos({ persona, onSaved }: { persona: Persona; 
         </div>
         <button type="button" onClick={generate} disabled={busy}
           className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-slate-700 disabled:opacity-50">
-          {busy ? "Generating + checking realism…" : "Generate 3 photos"}
+          {busy ? "Generating until realism ≥ 90…" : "Generate photos (aim 90+)"}
         </button>
       </div>
 
@@ -79,7 +79,7 @@ export default function PersonaPhotos({ persona, onSaved }: { persona: Persona; 
           ))}
         </div>
       )}
-      <p className="mt-2 text-[10px] text-slate-400">The highest-realism variation is auto-kept as the reference. Regenerate if none look right. Personas are fictional — never a real person.</p>
+      <p className="mt-2 text-[10px] text-slate-400">Keeps generating (up to 6 tries) until a shot clears a 90 realism score, then auto-keeps the best as the reference. Regenerate for a fresh set. Personas are fictional — never a real person.</p>
     </div>
   );
 }

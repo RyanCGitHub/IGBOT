@@ -24,25 +24,30 @@ export type CharacterBible = {
 };
 
 // gpt-image-1 has no separate negative-prompt field, so we embed it as "Avoid:".
+// Includes the "too-polished" tells that make AI portraits read as fake.
 export const DEFAULT_NEGATIVE =
   "plastic or waxy skin, over-smoothed airbrushed skin, warped/extra/fused fingers, " +
   "deformed or malformed hands, asymmetric or dead or glassy eyes, crossed eyes, extra limbs, " +
   "distorted or melted jewelry, uncanny-valley face, doll-like or mannequin look, " +
-  "blurry, low detail, watermark, text, logo, cartoon, illustration, 3d render, CGI, " +
-  "bad anatomy, disfigured, duplicated features";
+  "studio lighting, professional retouching, stock-photo look, magazine cover, over-sharpened, " +
+  "heavy HDR, beauty-filter skin, 3d render, CGI, octane render, cartoon, illustration, " +
+  "blurry, low detail, watermark, text, logo, bad anatomy, disfigured, duplicated features";
 
+// Candid/amateur framing reads far more real than a polished portrait — that's
+// the biggest lever on the realism score, so the prompt leans into it hard.
 export function photorealPrompt(b: CharacterBible, sceneHint?: string): string {
   const subject = [b.age_range, b.ethnicity_appearance, b.face_structure, b.hair, b.body_type]
     .map(s => (s ?? "").trim()).filter(Boolean).join(", ");
-  const scene = sceneHint || b.poses || "relaxed candid pose, looking toward the camera";
+  const scene = sceneHint || b.poses || "a relaxed, unposed candid moment";
   return [
-    `A candid, photorealistic Instagram photograph of a single fictional person${subject ? ` — ${subject}` : ""}.`,
+    `A candid, unposed amateur smartphone photo of a single fictional person${subject ? ` — ${subject}` : ""}.`,
     b.style_fashion ? `Wearing ${b.style_fashion}.` : "",
     `${scene}.`,
-    b.lighting_style ? `Lighting: ${b.lighting_style}.` : "Soft natural lighting.",
-    b.camera_style ? `Camera: ${b.camera_style}.` : "Shot on a modern smartphone, shallow depth of field.",
-    "Hyper-realistic, true-to-life skin with visible pores and natural texture and subtle imperfections,",
-    "realistic catchlights in the eyes, accurate hands and fingers, lifelike hair strands, natural color, sharp focus on the face, high detail.",
+    b.lighting_style ? `Lighting: ${b.lighting_style}.` : "Natural available light, soft and slightly uneven.",
+    b.camera_style ? `Camera: ${b.camera_style}.` : "Shot handheld on an iPhone, slight sensor grain, true-to-life dynamic range, natural imperfect framing.",
+    "It should look exactly like a real photo a normal person posted to Instagram — NOT a studio or professional shoot.",
+    "Authentic skin with visible pores, faint blemishes and natural under-eye shadows (never airbrushed or smoothed),",
+    "realistic eye catchlights with natural asymmetry, anatomically correct hands and fingers, individual flyaway hair strands, true-to-life skin tone and color.",
     "This is an ENTIRELY FICTIONAL AI-generated persona — it must not resemble any real, famous, or identifiable person.",
     `Avoid: ${b.negative_prompt || DEFAULT_NEGATIVE}.`,
   ].filter(Boolean).join(" ");
