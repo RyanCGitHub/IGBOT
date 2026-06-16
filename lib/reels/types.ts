@@ -5,6 +5,7 @@
 export type ReelRunStatus =
   | "queued"            // created by the planner; strategist not yet run
   | "briefed"           // structured brief generated
+  | "references_ready"  // licensed visual reference pack discovered for this reel
   | "keyframes_ready"   // every beat has a stored keyframe image
   | "clips_generating"  // video jobs submitted to the provider, awaiting completion
   | "lipsyncing"        // presenter mode: avatar clips being mouth-matched to voiceover
@@ -19,6 +20,7 @@ export type ReelRunStatus =
 export const ACTIVE_STATUSES: ReelRunStatus[] = [
   "queued",
   "briefed",
+  "references_ready",
   "keyframes_ready",
   "clips_generating",
   "lipsyncing",

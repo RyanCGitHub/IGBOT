@@ -27,6 +27,7 @@ import { checkPostingSpacing } from "@/lib/media-network/spacing";
 import { prePublishGate } from "@/lib/viral/gate";
 import { recordPublishedPost } from "@/lib/viral/accuracy";
 import { getActiveLearnings, learningsPromptBlock } from "@/lib/learning";
+import { discoverReferencePack, getReferenceContext } from "@/lib/references/pack";
 import type { ReelRun, ReelBrief, Keyframe, Clip, ReelRunAudio } from "@/lib/reels/types";
 
 const CAPTION_MODEL = "claude-sonnet-4-5";
@@ -90,6 +91,37 @@ async function stageBrief(run: ReelRun): Promise<AdvanceResult> {
 
   await saveRun(run.id, { brief, persona_id: personaId, status: "briefed", error_message: null });
   return { from: "queued", to: "briefed", note: `${brief.title} (est $${cost.totalUsd})` };
+}
+
+// ─── Stage: briefed → references_ready ───────────────────────────────────────
+// Discover a licensed visual reference pack (Pexels direct-use + web reference-
+// only) for this reel's exact topic/location/mood, analyzed into lighting/camera/
+// environment/palette guidance the keyframe stage feeds into the image prompts.
+// Fail-open: a discovery error never blocks the reel — it just advances with no
+// pack (keyframes then generate exactly as before).
+
+async function stageReferences(run: ReelRun): Promise<AdvanceResult> {
+  // Honor a manually locked pack — the owner pinned it, don't regenerate over it.
+  const { data: existing } = await supabaseServer
+    .from("reel_reference_packs").select("locked, status")
+    .eq("reel_id", run.id).eq("superseded", false).eq("locked", true).limit(1).maybeSingle();
+  if (existing) {
+    await saveRun(run.id, { status: "references_ready", error_message: null });
+    return { from: "briefed", to: "references_ready", note: "locked pack kept" };
+  }
+
+  let note = "skipped";
+  try {
+    const { pack, assets } = await discoverReferencePack(run.id);
+    note = pack.status === "ready"
+      ? `${assets.length} refs (${assets.filter(a => a.direct_use_allowed).length} direct-use)`
+      : `no refs (${pack.status})`;
+  } catch (e) {
+    console.error(`[reels/stages] reference discovery failed for run ${run.id} — continuing without:`, e instanceof Error ? e.message : e);
+    note = "discovery error (continuing)";
+  }
+  await saveRun(run.id, { status: "references_ready", error_message: null });
+  return { from: "briefed", to: "references_ready", note };
 }
 
 // ─── Persistent avatar (presenter mode) ──────────────────────────────────────
@@ -157,6 +189,35 @@ async function stageKeyframes(run: ReelRun): Promise<AdvanceResult> {
   const keyframes: Keyframe[] = [...(run.keyframes ?? [])];
   const have = new Set(keyframes.map(k => k.beat_index));
 
+  // Reference pack guidance (lighting/camera/environment/palette) for this reel —
+  // empty string when none was discovered, so prompts are unchanged in that case.
+  const refCtx = await getReferenceContext(run.id);
+
+  // Optional direct compositing: a license-clear background photo grounds non-
+  // avatar beats in the real place. Fetched once and reused. ONLY license-clear
+  // (direct_use_allowed) heroes reach here — reference-only assets are never
+  // composited. Avatar beats keep the avatar reference (identity wins).
+  let heroRef: { buffer: Buffer; mimeType: string } | null = null;
+  let heroTried = false;
+  const getHeroRef = async (): Promise<{ buffer: Buffer; mimeType: string } | null> => {
+    if (heroTried) return heroRef;
+    heroTried = true;
+    if (!refCtx.heroAssetId || !provider.editImage) return null;
+    try {
+      const { data } = await supabaseServer
+        .from("reference_assets").select("full_url, direct_use_allowed").eq("id", refCtx.heroAssetId).maybeSingle();
+      const a = data as { full_url: string | null; direct_use_allowed: boolean } | null;
+      if (!a?.full_url || !a.direct_use_allowed) return null;
+      const sharp = (await import("sharp")).default;
+      const jpeg = await sharp(await fetchToBuffer(a.full_url)).resize(1024, 1536, { fit: "cover" }).jpeg({ quality: 88 }).toBuffer();
+      heroRef = { buffer: jpeg, mimeType: "image/jpeg" };
+    } catch (e) {
+      console.warn(`[reels/stages] hero reference fetch failed for run ${run.id}:`, e instanceof Error ? e.message : e);
+      heroRef = null;
+    }
+    return heroRef;
+  };
+
   // Respect the shared per-account image cap; pipeline waits rather than fails.
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   const { count } = await supabaseServer
@@ -171,10 +232,10 @@ async function stageKeyframes(run: ReelRun): Promise<AdvanceResult> {
   for (let i = 0; i < brief.beats.length; i++) {
     if (have.has(i)) continue;
     if (Date.now() - started > STAGE_TIME_BUDGET_MS) {
-      return { from: "briefed", to: "briefed", note: `keyframes ${keyframes.length}/${brief.beats.length} (time budget)` };
+      return { from: "references_ready", to: "references_ready", note: `keyframes ${keyframes.length}/${brief.beats.length} (time budget)` };
     }
     if (capRemaining <= 0) {
-      return { from: "briefed", to: "briefed", note: `keyframes ${keyframes.length}/${brief.beats.length} (daily image cap — waiting)` };
+      return { from: "references_ready", to: "references_ready", note: `keyframes ${keyframes.length}/${brief.beats.length} (daily image cap — waiting)` };
     }
 
     const beat = brief.beats[i];
@@ -191,17 +252,34 @@ async function stageKeyframes(run: ReelRun): Promise<AdvanceResult> {
         brief.event_location ? `Location: ${brief.event_location} — the setting must look like the real place.` : null,
         beat.image_prompt,
         brief.visual_style,
+        refCtx.guidance || null,
         "Natural premium lighting, realistic cinematic quality. Vertical 9:16 composition. No text or lettering in the image.",
       ].filter(Boolean).join("\n\n");
       result = await provider.editImage(promptUsed, avatar, { size: "1024x1536" });
     } else {
-      promptUsed = [
-        brief.visual_style,
-        brief.event_location ? `Real location: ${brief.event_location} — geography, vegetation, and weather must match the real place.` : null,
-        beat.image_prompt,
-        "Vertical 9:16 composition. No text or lettering in the image.",
-      ].filter(Boolean).join("\n\n");
-      result = await provider.generateImage(promptUsed, { size: "1024x1536" });
+      // Non-avatar beat: composite onto a license-clear background when one exists,
+      // otherwise generate fresh — both steered by the reference guidance.
+      const hero = await getHeroRef();
+      if (hero && provider.editImage) {
+        promptUsed = [
+          "Use the attached photo ONLY as the real-world environment/background reference — match its location, architecture, materials, and setting.",
+          "Generate a NEW candid, handheld smartphone photo set in this place; recompose naturally, do not copy the reference exactly.",
+          brief.visual_style,
+          beat.image_prompt,
+          refCtx.guidance || null,
+          "Vertical 9:16 composition. No text or lettering in the image.",
+        ].filter(Boolean).join("\n\n");
+        result = await provider.editImage(promptUsed, hero, { size: "1024x1536" });
+      } else {
+        promptUsed = [
+          brief.visual_style,
+          brief.event_location ? `Real location: ${brief.event_location} — geography, vegetation, and weather must match the real place.` : null,
+          beat.image_prompt,
+          refCtx.guidance || null,
+          "Vertical 9:16 composition. No text or lettering in the image.",
+        ].filter(Boolean).join("\n\n");
+        result = await provider.generateImage(promptUsed, { size: "1024x1536" });
+      }
     }
     capRemaining--;
 
@@ -227,7 +305,7 @@ async function stageKeyframes(run: ReelRun): Promise<AdvanceResult> {
   }
 
   await saveRun(run.id, { status: "keyframes_ready", error_message: null });
-  return { from: "briefed", to: "keyframes_ready", note: `${keyframes.length} keyframes` };
+  return { from: "references_ready", to: "keyframes_ready", note: `${keyframes.length} keyframes` };
 }
 
 // ─── Stage: keyframes_ready → clips_generating ───────────────────────────────
@@ -834,7 +912,8 @@ async function stageFinishPublish(run: ReelRun): Promise<AdvanceResult> {
 export async function advanceRun(run: ReelRun): Promise<AdvanceResult> {
   switch (run.status) {
     case "queued": return stageBrief(run);
-    case "briefed": return stageKeyframes(run);
+    case "briefed": return stageReferences(run);
+    case "references_ready": return stageKeyframes(run);
     case "keyframes_ready": return stageSubmitClips(run);
     case "clips_generating": return stageCollectClips(run);
     case "clips_ready": return stageLipsyncOrAssemble(run);
