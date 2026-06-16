@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { apiFetch } from "@/lib/api-fetch";
+import ReelReferences from "@/app/components/ReelReferences";
 import type { ReelsAccountSettings, ReelRunView } from "@/lib/supabase";
 
 // The Reels autopilot control surface. By design this is view-mostly: the only
@@ -9,13 +10,14 @@ import type { ReelsAccountSettings, ReelRunView } from "@/lib/supabase";
 // publishing, and learning all run on crons.
 
 const STAGE_ORDER = [
-  "queued", "briefed", "keyframes_ready", "clips_generating",
+  "queued", "briefed", "references_ready", "keyframes_ready", "clips_generating",
   "lipsyncing", "clips_ready", "assembled", "captioned", "publishing", "published",
 ];
 
 const STAGE_LABELS: Record<string, string> = {
   queued: "Queued",
   briefed: "Brief ready",
+  references_ready: "References found",
   keyframes_ready: "Keyframes ready",
   clips_generating: "Generating clips",
   lipsyncing: "Lip-syncing host",
@@ -280,6 +282,8 @@ export default function ReelsAutopilot() {
                     {run.error_message}
                   </p>
                 )}
+
+                <ReelReferences reelId={run.id} />
               </div>
             ))
           )}

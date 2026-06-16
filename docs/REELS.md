@@ -71,6 +71,45 @@ Optional:
 - `REELS_MAX_COST_USD` (default 12) — **owner-approved per-reel cost cap.** A run
   whose worst-case estimate exceeds this fails at the brief stage, before any
   paid generation. Raising it constitutes manual budget approval.
+- `PEXELS_API_KEY` — Reference Discovery (see below). Free key; enables both photo
+  and short-video references, license-clean (Pexels License → direct-use eligible).
+- `SERPAPI_KEY` **or** `GOOGLE_CSE_KEY` + `GOOGLE_CSE_CX` — Reference Discovery
+  reference-only tier (arbitrary web images for hard-to-find contextual shots).
+  Results are always marked reference-only and never reposted. SerpAPI is used
+  when present; otherwise Google CSE. All three are optional — discovery degrades
+  to "no references" and the reel generates exactly as before.
+
+## Reference Discovery Engine
+
+Between `briefed` and `keyframes_ready` the pipeline runs a `references_ready`
+stage that auto-discovers a unique, licensed visual reference pack for each reel
+— so AI footage is grounded in how the real place actually looks (lighting,
+environment, composition, palette) without anyone uploading references by hand.
+
+How it works (all steps fail open — any error advances the reel with no pack):
+
+1. Claude turns the brief (topic, location, mood, beats, persona/niche) into
+   5–10 specific stock-search queries.
+2. Configured providers are searched: **Pexels** photos + short videos
+   (license-clean) and, if configured, **SerpAPI/Google CSE** web images
+   (reference-only).
+3. Results are de-duped, resolution-filtered, and persisted to
+   `reference_assets` with full license metadata (provider, source URL, license
+   type/url, creator, domain) and a `direct_use_allowed` / `reference_only` /
+   `needs_review` posture.
+4. Claude-vision analyzes the thumbnails into one guide — color palette, lighting,
+   camera, environment, texture, realism notes — stored in `reel_reference_packs`.
+   It also flags any reference with a visible watermark or an identifiable real
+   person; those are demoted to reference-only + needs-review.
+5. The keyframe stage injects that guidance into every image prompt. When a
+   **license-clear** "hero" background exists, non-avatar beats are composited
+   onto it via images/edits (recomposed, not copied). Reference-only assets are
+   **never** reposted or composited — only their abstract style informs the prompt.
+
+Owner controls live in the dashboard's Reels pipeline under each run's
+**References** panel: auto-find / regenerate, per-asset source + license status,
+lock the pack (auto-pilot won't regenerate a locked pack), and remove a bad
+reference. Personas remain fictional; no real or celebrity likeness is generated.
 
 ## Viral ruleset
 
