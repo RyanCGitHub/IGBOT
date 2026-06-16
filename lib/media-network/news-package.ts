@@ -30,6 +30,7 @@ export async function buildNewsPackage(
   const packageType = ["breaking_news_reel", "news_carousel", "image_headline_post"].includes(String(packageTypeRaw))
     ? String(packageTypeRaw)
     : "image_headline_post";
+  const isReel = packageType === "breaking_news_reel";
 
   // ── Load item + brand + source, run compliance up front ────────────────────
   const { data: item } = await supabaseServer.from("news_items").select("*").eq("id", itemId).single<NewsItem>();
@@ -174,8 +175,10 @@ ${item.sensitivity_level === "high" ? "- HIGH sensitivity: neutral careful wordi
     complianceNotes.push(`Headline graphic failed (non-fatal): ${e instanceof Error ? e.message : String(e)}`);
   }
 
-  // Manual lane: also render a silent 9:16 motion Reel for in-app upload.
-  if (manual) {
+  // Render a silent 9:16 motion Reel when this is a Reel package (auto-published
+  // through the reels pipeline) OR the manual lane (in-app upload). Only when the
+  // 4:5 image already validated (processedMediaPath set) — same real background.
+  if ((manual || isReel) && processedMediaPath) {
     try {
       const still = await renderHeadlineGraphic({
         brandName: brand.brand_name,
@@ -191,7 +194,7 @@ ${item.sensitivity_level === "high" ? "- HIGH sensitivity: neutral careful wordi
       const up = await uploadToBucket(`media-network/${brand.id}/news-${item.id}-${Date.now()}.mp4`, video, "video/mp4");
       manualVideoPath = up.path;
     } catch (e) {
-      complianceNotes.push(`Manual motion video failed (non-fatal): ${e instanceof Error ? e.message : String(e)}`);
+      complianceNotes.push(`Motion video failed (non-fatal): ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
@@ -225,8 +228,8 @@ ${item.sensitivity_level === "high" ? "- HIGH sensitivity: neutral careful wordi
       urgency_level: item.claim_type === "confirmed" ? "high" : "medium",
       // Manual items wait in the Manual Queue (status "ready"); auto items follow
       // the compliance verdict into draft/idea — but only if real media rendered
-      // (no media = "idea", never auto-published).
-      status: manual ? "ready" : (verdict.allowed && processedMediaPath ? "draft" : "idea"),
+      // (reels also need the video; no media = "idea", never auto-published).
+      status: manual ? "ready" : (verdict.allowed && processedMediaPath && (!isReel || manualVideoPath) ? "draft" : "idea"),
     })
     .select("*")
     .single<ContentPackage>();

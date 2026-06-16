@@ -64,6 +64,18 @@ async function nextOpenSlot(accountId: number, spacingMin: number): Promise<Date
   return new Date(earliest);
 }
 
+// Aim for ~50/50 image posts vs Reels. Pick whichever the brand currently has
+// FEWER of among its scheduled/published news content — self-balances over time.
+async function pickNewsContentType(brandId: number): Promise<"breaking_news_reel" | "image_headline_post"> {
+  const { data } = await supabaseServer
+    .from("content_packages").select("package_type")
+    .eq("media_brand_id", brandId).eq("package_family", "news_media")
+    .in("status", ["scheduled", "published"]).limit(500);
+  const reels = (data ?? []).filter(p => p.package_type === "breaking_news_reel").length;
+  const images = (data ?? []).length - reels;
+  return reels <= images ? "breaking_news_reel" : "image_headline_post";
+}
+
 function spacingFor(brand: Pick<MediaBrand, "min_minutes_between_posts">): number {
   let mins = brand.min_minutes_between_posts || DEFAULT_SPACING_MIN;
   const floor = Number(process.env.POSTS_MIN_SPACING_MINUTES);
@@ -109,9 +121,10 @@ export async function runNewsAutoPilot(): Promise<AutoPilotSummary> {
     const brand = brandById.get(item.media_brand_id);
     if (!brand?.connected_account_id) continue;
 
+    const contentType = await pickNewsContentType(item.media_brand_id);
     let built;
     try {
-      built = await buildNewsPackage(item.id, "image_headline_post");
+      built = await buildNewsPackage(item.id, contentType);
     } catch (e) {
       summary.failed++;
       await markItemNeedsReview(item.id, `auto-pilot generation threw: ${e instanceof Error ? e.message : String(e)}`);
@@ -127,11 +140,12 @@ export async function runNewsAutoPilot(): Promise<AutoPilotSummary> {
     }
 
     const pkg = built.package;
+    const wantReel = pkg.package_type === "breaking_news_reel";
 
-    // Generation parked it (compliance blocked at build) or rendered no media.
-    if (pkg.status !== "draft" || !pkg.processed_media_path) {
+    // Generation parked it (compliance blocked) or rendered no usable media.
+    if (pkg.status !== "draft" || !pkg.processed_media_path || (wantReel && !pkg.manual_video_path)) {
       summary.parked++;
-      summary.details.push(`pkg ${pkg.id}: parked (${pkg.status}${pkg.processed_media_path ? "" : ", no media"}) — review in Packages`);
+      summary.details.push(`pkg ${pkg.id}: parked (${pkg.status}${pkg.processed_media_path ? "" : ", no media"}${wantReel && !pkg.manual_video_path ? ", no reel video" : ""}) — review in Packages`);
       continue;
     }
 
@@ -156,9 +170,40 @@ export async function runNewsAutoPilot(): Promise<AutoPilotSummary> {
 
     // Schedule into the next open, spacing-respecting slot.
     const slot = await nextOpenSlot(brand.connected_account_id, spacingFor(brand));
-    const fullCaption = [pkg.caption, pkg.hashtags].filter(Boolean).join("\n\n");
     const now = new Date().toISOString();
 
+    if (wantReel) {
+      // News Reel → the proven reels pipeline (publishes via the REELS Graph API
+      // endpoint, saves the IG media id, and tracks analytics).
+      const { data: run, error: runErr } = await supabaseServer
+        .from("reel_runs")
+        .insert({
+          account_id: brand.connected_account_id,
+          status: "captioned",
+          brief: { title: pkg.title, beats: [], cover_title: pkg.on_screen_text ?? pkg.title },
+          assembled_video_path: pkg.manual_video_path,   // the 9:16 motion video
+          cover_path: pkg.processed_media_path,           // the still as the cover
+          caption: pkg.caption,
+          hashtags: pkg.hashtags,
+          scheduled_for: slot.toISOString(),
+        })
+        .select("id")
+        .single();
+      if (runErr || !run) {
+        summary.failed++;
+        summary.details.push(`pkg ${pkg.id}: reel_run insert failed — ${runErr?.message ?? "unknown"}`);
+        continue;
+      }
+      await supabaseServer.from("content_packages")
+        .update({ linked_reel_run_id: run.id, status: "scheduled", suggested_publish_time: slot.toISOString(), updated_at: now })
+        .eq("id", pkg.id);
+      summary.scheduled++;
+      summary.details.push(`pkg ${pkg.id} → REEL run ${run.id} scheduled ${slot.toISOString()}`);
+      continue;
+    }
+
+    // Image post → the existing image publisher.
+    const fullCaption = [pkg.caption, pkg.hashtags].filter(Boolean).join("\n\n");
     const { data: post, error: postErr } = await supabaseServer
       .from("ig_posts")
       .insert({
