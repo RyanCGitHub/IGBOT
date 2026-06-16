@@ -4,6 +4,7 @@
 import { supabaseServer } from "@/lib/supabase-server";
 import { prePublishGate } from "@/lib/viral/gate";
 import { recordPublishedPost } from "@/lib/viral/accuracy";
+import { validatePublishMedia } from "@/lib/media/validate";
 import {
   createLogger,
   createMediaContainer,
@@ -82,6 +83,16 @@ export async function publishIgPost(
   }
   if (!post.caption?.trim()) {
     return err("Post has no caption.", 400);
+  }
+
+  // Hard media gate — never publish a blank/broken/placeholder image.
+  const mediaCheck = await validatePublishMedia({ mediaType: post.media_type, imageUrl: post.image_url, videoUrl: null });
+  if (!mediaCheck.ok) {
+    await supabaseServer.from("ig_posts")
+      .update({ status: "failed", error_message: mediaCheck.reason, updated_at: new Date().toISOString() })
+      .eq("id", postId);
+    console.warn(`[publish] post ${postId} BLOCKED — ${mediaCheck.reason}`);
+    return err(mediaCheck.reason, 400);
   }
   if (post.status === "published" || post.status === "republished") {
     return err("Post is already published.", 409);
