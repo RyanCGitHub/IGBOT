@@ -92,8 +92,11 @@ export async function sourceBackgroundImage(opts: {
   subject: string | null;      // best person/entity to photograph, from the generator
   sceneHint: string;           // fallback scene description (headline works)
   allowGenerated?: boolean;    // gate the paid AI fallback (default true)
+  forceGenerated?: boolean;    // skip Wikipedia, go straight to the AI backdrop
 }): Promise<BackgroundImage | null> {
   const subject = (opts.subject ?? "").trim();
+
+  if (opts.forceGenerated) return generateEditorial(subject || opts.sceneHint);
 
   // Try each candidate name (handles "Taylor Swift & Travis Kelce").
   if (subject) {

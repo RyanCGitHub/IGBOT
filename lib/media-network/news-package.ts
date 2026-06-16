@@ -3,6 +3,7 @@ import { supabaseServer } from "@/lib/supabase-server";
 import { uploadToBucket } from "@/lib/reels/storage";
 import { renderHeadlineGraphic } from "@/lib/media-network/headline-graphic";
 import { sourceBackgroundImage } from "@/lib/media-network/background-image";
+import { hasVisiblePhoto } from "@/lib/media/validate";
 import { renderMotionReel } from "@/lib/media-network/motion-graphic";
 import { sourcePublishability, newsVerificationVerdict } from "@/lib/media-network/compliance";
 import type { ContentPackage, NewsItem, MediaBrand, ContentSource } from "@/lib/media-network/types";
@@ -138,23 +139,37 @@ ${item.sensitivity_level === "high" ? "- HIGH sensitivity: neutral careful wordi
   const headlineText = String(gen.headline_graphic_text ?? item.headline).slice(0, 140);
   // Lead with a real (license-clean) photo of the subject, else an editorial
   // backdrop — never a blank background. (sourceBackgroundImage never throws.)
-  const bg = await sourceBackgroundImage({
-    subject: gen.image_subject ?? item.people_or_brands_involved ?? null,
-    sceneHint: headlineText,
-  });
+  const subjectHint = gen.image_subject ?? item.people_or_brands_involved ?? null;
+  let bg = await sourceBackgroundImage({ subject: subjectHint, sceneHint: headlineText });
+
+  const renderGraphic = (background: Buffer | null, credit: string | null) =>
+    renderHeadlineGraphic({
+      brandName: brand.brand_name, handle: brand.instagram_handle,
+      headline: headlineText, tag, creditText, background, photoCredit: credit,
+    });
 
   try {
-    const graphic = await renderHeadlineGraphic({
-      brandName: brand.brand_name,
-      handle: brand.instagram_handle,
-      headline: headlineText,
-      tag,
-      creditText,
-      background: bg?.buffer ?? null,
-      photoCredit: bg?.attribution ?? null,
-    });
-    const upload = await uploadToBucket(`media-network/${brand.id}/news-${item.id}-${Date.now()}.jpg`, graphic, "image/jpeg");
-    processedMediaPath = upload.path;
+    let graphic = await renderGraphic(bg?.buffer ?? null, bg?.attribution ?? null);
+
+    // NEVER publish a blank background. If the photo didn't actually land, retry
+    // once with a generated editorial backdrop.
+    if (!(await hasVisiblePhoto(graphic))) {
+      complianceNotes.push("Primary background was blank — retried with a generated backdrop.");
+      const fallback = await sourceBackgroundImage({ subject: subjectHint, sceneHint: headlineText, forceGenerated: true });
+      if (fallback?.buffer) {
+        bg = fallback;
+        graphic = await renderGraphic(fallback.buffer, fallback.attribution);
+      }
+    }
+
+    if (await hasVisiblePhoto(graphic)) {
+      const upload = await uploadToBucket(`media-network/${brand.id}/news-${item.id}-${Date.now()}.jpg`, graphic, "image/jpeg");
+      processedMediaPath = upload.path;
+    } else {
+      // Still blank — do NOT make this publishable (no media = parked for review).
+      complianceNotes.push("No usable background image — parked (a post needs a real visual).");
+      console.warn(`[news-package] item ${item.id}: blank background after retry — not publishing`);
+    }
   } catch (e) {
     complianceNotes.push(`Headline graphic failed (non-fatal): ${e instanceof Error ? e.message : String(e)}`);
   }
@@ -209,8 +224,9 @@ ${item.sensitivity_level === "high" ? "- HIGH sensitivity: neutral careful wordi
       manual_video_path: manualVideoPath,
       urgency_level: item.claim_type === "confirmed" ? "high" : "medium",
       // Manual items wait in the Manual Queue (status "ready"); auto items follow
-      // the compliance verdict into draft/idea for the auto-pilot.
-      status: manual ? "ready" : (verdict.allowed ? "draft" : "idea"),
+      // the compliance verdict into draft/idea — but only if real media rendered
+      // (no media = "idea", never auto-published).
+      status: manual ? "ready" : (verdict.allowed && processedMediaPath ? "draft" : "idea"),
     })
     .select("*")
     .single<ContentPackage>();
