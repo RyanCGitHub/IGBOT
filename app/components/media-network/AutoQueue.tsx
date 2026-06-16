@@ -118,7 +118,12 @@ export default function AutoQueue() {
                   <img src={p.media_public_url} alt="" className="h-28 w-[90px] shrink-0 rounded-lg object-cover" />
                 )}
                 <div className="flex min-w-0 flex-1 flex-col">
-                  <p className="line-clamp-2 text-sm font-medium text-slate-200">{p.title}</p>
+                  <p className="line-clamp-2 text-sm font-medium text-slate-200">
+                    <span className={`mr-1.5 rounded px-1.5 py-0.5 text-[10px] font-semibold ${p.package_type === "breaking_news_reel" ? "bg-fuchsia-500/20 text-fuchsia-300" : "bg-sky-500/20 text-sky-300"}`}>
+                      {p.package_type === "breaking_news_reel" ? "REEL" : "IMAGE"}
+                    </span>
+                    {p.title}
+                  </p>
                   <p className="mt-1 text-[11px] font-semibold text-fuchsia-300">▶ {ptTime(p.suggested_publish_time)}</p>
                   <p className="mt-0.5 line-clamp-2 text-[11px] text-slate-500">{p.caption}</p>
                   <div className="mt-auto pt-2">
