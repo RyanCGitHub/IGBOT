@@ -6,6 +6,7 @@ import { apiFetch } from "@/lib/api-fetch";
 import { supabase } from "@/lib/supabase";
 import PublishGate from "@/app/components/viral/PublishGate";
 import ViralAccuracy from "@/app/components/viral/ViralAccuracy";
+import PredictedVsActual from "@/app/components/viral/PredictedVsActual";
 
 // Viral Potential Checker (V1): upload a photo/reel, add caption/hashtags/audio,
 // pick the account + lane, get a 0–100 rubric-weighted AI score with a
@@ -189,6 +190,8 @@ export default function ViralCheckerPage() {
         <PublishGate />
 
         <ViralAccuracy />
+
+        <PredictedVsActual />
 
         <div className="grid gap-5 lg:grid-cols-2">
           {/* ── Input ── */}
