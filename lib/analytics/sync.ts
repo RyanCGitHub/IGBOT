@@ -21,6 +21,7 @@ import type { ContentLane } from "@/lib/viral/rubric";
 
 const MEDIA_PER_ACCOUNT = 25;
 const MAX_BACKFILLS_PER_RUN = 8;
+const MAX_SYNC_ERRORS = 5; // give up tracking a post after this many consecutive sync failures
 const HIGH_MATCH = 0.8;   // auto-resolve manual queue
 const MEDIUM_MATCH = 0.5; // surface as "possible match"
 // Tracking window schedule (hours since publish).
@@ -168,7 +169,7 @@ export async function syncInstagramAnalytics(opts?: { dryRun?: boolean; trigger?
 
       // ── Recheck DUE posts (snapshot) ───────────────────────────────────────
       const { data: duePosts } = await supabaseServer
-        .from("published_posts").select("id, instagram_media_id, media_type, media_product_type, published_at, next_analytics_sync_at, account_id")
+        .from("published_posts").select("id, instagram_media_id, media_type, media_product_type, published_at, next_analytics_sync_at, account_id, sync_error_count")
         .eq("account_id", accountId).eq("analytics_tracking_status", "tracking")
         .or(`next_analytics_sync_at.is.null,next_analytics_sync_at.lte.${now}`)
         .limit(100);
@@ -183,10 +184,23 @@ export async function syncInstagramAnalytics(opts?: { dryRun?: boolean; trigger?
         const ins = await getMediaInsights(pp.instagram_media_id as string, token, mlog, productType);
         if ("error" in ins) {
           if (ins.code != null && MEDIA_DELETED_CODES.has(ins.code)) {
+            // Post gone from Instagram — stop tracking, keep its last snapshot.
             await supabaseServer.from("published_posts").update({ analytics_tracking_status: "complete", status: "deleted_on_instagram", updated_at: now }).eq("id", pp.id);
+            log(`post ${pp.id}: deleted on Instagram — tracking stopped`);
           } else {
-            await supabaseServer.from("published_posts").update({ sync_error_count: 1, last_sync_error: ins.error, last_analytics_sync_at: now, updated_at: now }).eq("id", pp.id);
+            // Transient/Meta error — count it, retry next hour, give up after MAX.
+            const errCount = ((pp.sync_error_count as number) ?? 0) + 1;
+            const giveUp = errCount >= MAX_SYNC_ERRORS;
+            await supabaseServer.from("published_posts").update({
+              sync_error_count: errCount,
+              last_sync_error: ins.error,
+              last_analytics_sync_at: now,
+              analytics_tracking_status: giveUp ? "error" : "tracking",
+              next_analytics_sync_at: giveUp ? null : new Date(nowMs + 3_600_000).toISOString(),
+              updated_at: now,
+            }).eq("id", pp.id);
             sum.errors_count++;
+            log(`post ${pp.id}: sync error (${errCount}/${MAX_SYNC_ERRORS})${giveUp ? " — giving up, marked 'error'" : " — will retry"}: ${ins.error}`);
           }
           continue;
         }
