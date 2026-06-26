@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { supabaseServer } from "@/lib/supabase-server";
 import { VALID_STATUSES } from "@/lib/supabase";
 import type { PostStatus } from "@/lib/supabase";
 import { requireApiKey } from "@/lib/auth";
@@ -12,7 +12,7 @@ export async function GET(request: Request) {
   const authError = requireApiKey(request);
   if (authError) return authError;
 
-  const { data, error } = await supabase
+  const { data, error } = await supabaseServer
     .from("posts")
     .select("id, title, caption, hashtags, status, created_at")
     .order("created_at", { ascending: false });
@@ -73,7 +73,7 @@ export async function POST(request: Request) {
   const status: PostStatus =
     body.status && VALID_STATUSES.includes(body.status) ? body.status : "draft";
 
-  const { data, error } = await supabase
+  const { data, error } = await supabaseServer
     .from("posts")
     .insert({
       title: body.title.trim(),
