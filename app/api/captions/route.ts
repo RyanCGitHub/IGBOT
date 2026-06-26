@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { supabaseServer } from "@/lib/supabase-server";
 import { requireApiKey } from "@/lib/auth";
 
 const PROMPT_MAX = 2_000;
@@ -9,7 +9,7 @@ export async function GET(request: Request) {
   const authError = requireApiKey(request);
   if (authError) return authError;
 
-  const { data, error } = await supabase
+  const { data, error } = await supabaseServer
     .from("saved_captions")
     .select("id, prompt, caption, created_at")
     .order("created_at", { ascending: false })
@@ -65,7 +65,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const { data, error } = await supabase
+  const { data, error } = await supabaseServer
     .from("saved_captions")
     .insert({ prompt: body.prompt.trim(), caption: body.caption.trim() })
     .select("id, prompt, caption, created_at")

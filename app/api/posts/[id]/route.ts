@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { supabaseServer } from "@/lib/supabase-server";
 import { VALID_STATUSES } from "@/lib/supabase";
 import type { PostStatus } from "@/lib/supabase";
 import { requireApiKey } from "@/lib/auth";
@@ -70,7 +70,7 @@ export async function PUT(
     return NextResponse.json({ success: false, error: "Invalid status value." }, { status: 400 });
   }
 
-  const { data, error } = await supabase
+  const { data, error } = await supabaseServer
     .from("posts")
     .update({
       title: body.title.trim(),
@@ -109,7 +109,7 @@ export async function DELETE(
 
   // .select().single() causes PostgREST to error (PGRST116) when 0 rows are
   // deleted, giving us a real 404 instead of a silent no-op success.
-  const { error } = await supabase
+  const { error } = await supabaseServer
     .from("posts")
     .delete()
     .eq("id", numericId)
